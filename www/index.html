@@ -133,7 +133,7 @@ body.touch #joy-hint { display: grid; }
 .mbtn.primary { background: linear-gradient(135deg, #ff7a1a, #ff4f6d); border: none; }
 .mbtn.wide { grid-column: span 2; }
 .mbtn:disabled { opacity: .4; }
-#title { background: radial-gradient(ellipse at 50% 120%, rgba(255,122,26,.35), rgba(6,9,18,.6) 60%); }
+#title { background: linear-gradient(180deg, rgba(6,9,18,.05) 0%, rgba(6,9,18,.15) 45%, rgba(6,9,18,.55) 100%); backdrop-filter: none; -webkit-backdrop-filter: none; }
 #title .logo { font-size: clamp(30px, 7vw, 58px); font-weight: 900; letter-spacing: 2px; line-height: .95; text-align: center;
   background: linear-gradient(180deg, #fff, #ffd2a8 55%, #ff7a1a); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 12px rgba(0,0,0,.5)); }
 #title .tag { text-align: center; color: var(--muted); font-weight: 600; margin: 6px 0 14px; }
@@ -158,6 +158,7 @@ body.touch #joy-hint { display: grid; }
 #loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: #0e1424; font-weight: 800; letter-spacing: 1px; }
 .summary-lines { color: var(--muted); font-size: 14px; line-height: 1.7; margin-bottom: 10px; }
 .earned { font-size: 28px; font-weight: 900; color: #ffd84d; margin: 4px 0 12px; }
+body.on-title .hud, body.on-title #controls { visibility: hidden; }
 #fps { bottom: calc(10px + var(--sab)); left: calc(12px + var(--sal)); font-size: 11px; color: var(--muted); }
 @media (max-height: 420px) {
   #minimap { width: 96px; height: 96px; }
@@ -167,7 +168,7 @@ body.touch #joy-hint { display: grid; }
 }
 </style>
 </head>
-<body>
+<body class="on-title">
 <canvas id="game"></canvas>
 <div id="touch"></div>
 
@@ -184,7 +185,6 @@ body.touch #joy-hint { display: grid; }
   <canvas id="minimap" width="236" height="236"></canvas>
   <div class="col">
     <div id="btn-pause" class="small-btn btn" title="Pause (Esc)"><svg viewBox="0 0 24 24" fill="#fff"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
-    <div id="btn-cam" class="small-btn btn" title="Camera (V)" style="position:relative"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span id="cam-label">3RD</span></div>
   </div>
 </div>
 <div id="reticle" class="hud"></div>
@@ -193,7 +193,7 @@ body.touch #joy-hint { display: grid; }
 <div id="obj-arrow" class="hud" style="display:none"><div></div><span id="obj-dist"></span></div>
 <div id="speedo" class="hud"><span id="speed">0</span><small>KM/H</small></div>
 <div id="btn-action" class="hud btn" style="display:none"><span>📦</span><span id="action-label">Start job</span></div>
-<div id="kb-hint" class="hud"><b>WASD</b> move · <b>Mouse</b> look<br><b>Hold L-Click / Shift</b> swing<br><b>Space</b> jump · hold = dive<br><b>E</b> zip · <b>F</b> throw papers<br><b>Enter</b> start job · <b>V</b> camera<br><b>M</b> map · <b>Esc</b> menu</div>
+<div id="kb-hint" class="hud"><b>WASD</b> move · <b>Mouse</b> look<br><b>Hold L-Click / Shift</b> swing<br><b>Space</b> jump · hold = dive<br><b>E</b> zip (mid-air = web-zip boost) · <b>F</b> throw<br><b>Enter</b> start job<br><b>M</b> map · <b>Esc</b> menu</div>
 
 <div id="controls">
   <div id="joy-hint" class="hud">MOVE<br>drag here</div>
@@ -222,7 +222,6 @@ body.touch #joy-hint { display: grid; }
     <h2>Paused</h2>
     <div class="menu-btns">
       <button class="mbtn primary wide" id="resume">▶ Resume</button>
-      <button class="mbtn" id="toggle-cam">Camera: 3rd person</button>
       <button class="mbtn" data-open="map">City map</button>
       <button class="mbtn" data-open="shop">Shop &amp; suits</button>
       <button class="mbtn" data-open="settings">Settings</button>
@@ -237,7 +236,7 @@ body.touch #joy-hint { display: grid; }
 <div id="settings" class="menu hidden">
   <div class="card">
     <h2>Settings</h2>
-    <div class="row"><span>Graphics</span><div class="seg" id="set-quality"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
+    <div class="row"><span>Graphics<br><small style="color:var(--muted)">Low = fastest · High = shadows+AA</small></span><div class="seg" id="set-quality"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
     <div class="row"><span>Look sensitivity</span><input type="range" id="set-sens" min="0.3" max="2.5" step="0.1"></div>
     <div class="row"><span>Invert look Y</span><div class="seg" id="set-invert"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
     <div class="row"><span>Hold-to-cruise (auto-chain webs)</span><div class="seg" id="set-chain"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
@@ -269,9 +268,11 @@ body.touch #joy-hint { display: grid; }
       <div><b>JUMP while swinging</b> – leap off with a flip</div>
       <div><b>Hold JUMP in the air</b> – dive to build speed</div>
       <div><b>Tap JUMP in the air</b> – do a trick</div>
-      <div><b>Run into a wall</b> – wall-run straight up it</div>
-      <div><b>ZIP</b> – zip to the ledge under the crosshair. Press JUMP as you land for a point-launch!</div>
-      <div><b>👁 button</b> – switch first / third person</div>
+      <div><b>Run into a wall</b> – wall-run. Look up to climb, look sideways to run along it, wrap around corners</div>
+      <div><b>JUMP on a wall</b> – kick off toward where you look. JUMP as you clear a ledge to launch</div>
+      <div><b>ZIP</b> – zip to the ledge under the crosshair (JUMP on landing = point-launch)</div>
+      <div><b>ZIP in mid-air</b> – web-zip forward for a burst of speed</div>
+      <div><b>Look while swinging</b> – the swing curves toward where you look</div>
       <div><b>Jobs</b> – stand in an orange 🍕 or blue 📰 ring and tap the button</div>
       <div><b>Pizza</b> – deliver on time; hard crashes ruin the pizza</div>
       <div><b>Papers</b> – THROW auto-aims at the nearest subscriber</div>

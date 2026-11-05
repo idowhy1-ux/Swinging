@@ -132,7 +132,8 @@ export class WebSystem {
         _q.setFromUnitVectors(UPV, _d.divideScalar(l));
         _a.add(_b).multiplyScalar(0.5);
         // keep distant lines at least ~2px wide so they don't break into dashes
-        const rr = camPos ? Math.max(r, r * _a.distanceTo(camPos) * 0.09) : r;
+        // constant on-screen thickness: thin near your hand, still visible far away
+        const rr = camPos ? (r / 0.032) * (0.004 + _a.distanceTo(camPos) * 0.0024) : r;
         _m.compose(_a, _q, _s.set(rr, l, rr));
         this.mesh.setMatrixAt(k++, _m);
       }

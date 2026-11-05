@@ -1,9 +1,8 @@
 # Skyline Courier 🕸️🍕📰
 
-An open-world **web-swinging** game for Android. Swing through a living city as a
-masked sky courier, run up skyscrapers, zip to ledges, and earn cash doing
-**pizza deliveries** and **newspaper routes**. Switch between **first-person and
-third-person** at any time.
+An open-world **web-swinging** game for Android. Swing through a living city in
+**first person** as a masked sky courier, run up and along skyscrapers, zip to
+ledges, and earn cash doing **pizza deliveries** and **newspaper routes**.
 
 The game is written in JavaScript with [three.js](https://threejs.org) and is
 packaged as a native Android app, a full-screen hardware-accelerated WebView
@@ -18,32 +17,37 @@ Every model, texture and sound is generated in code.
 
 ## Features
 
-**Swinging that feels physical**
-- Web lines are real pendulum constraints with gravity, air drag and momentum. Webs stick to actual building surfaces, and wrap around corners they catch on.
-- Swing speed depends on where you anchor and when you let go. Release near the top of the arc for a **PERFECT RELEASE** boost.
-- **Hold-to-cruise**: keep holding SWING and webs chain automatically. You can turn this off in Settings for fully manual swinging.
-- **Wall-running**: run or swing into a building to sprint straight up it, then vault over the roof edge or wall-jump off.
-- **Point-zip** to the ledge under your crosshair. Press JUMP as you land for a **point launch**.
-- **Dive** (hold JUMP in the air) to build speed, then catch yourself with a web to turn the fall into forward speed.
-- Air tricks, flips, landing rolls, and a style/combo system that pays out tips.
+**First-person web-swinging**
+- Web lines are real pendulum constraints with gravity, air drag and momentum. They stick to actual building surfaces and wrap around corners they catch on.
+- **Look to steer**: the swing curves toward where you look, so you can carve around corners. Hold SWING to cruise from web to web, or time your release at the top of the arc for a **PERFECT RELEASE** boost.
+- **Web-zip**: press ZIP in mid-air to yank yourself forward for a burst of speed. On a ledge under your crosshair, ZIP pulls you there instead; JUMP as you land for a **point launch**.
+- **Dive** (hold JUMP in the air) to build speed, then catch a web to turn the fall into forward speed.
+- Full-body first-person feel: IK arms with articulated fingers grab the web, plant on walls and pump as you run, plus head bob, landing dips, lean into swings, FOV kicks and speed blur.
 
-**First- and third-person**
-- Third-person: a collision-aware orbit camera that follows your swings, with speed-based FOV, camera roll and speed lines.
-- First-person: your arms aim at the web anchor, the view bobs as you run, and the camera rolls with the swing. Switch with the 👁 button (or **V**), with a smooth transition.
+**Wall-running**
+- Run or swing into a building to stick to it. Look where you want to go: up the wall, sideways along it, or down. Entry speed carries over.
+- Run around **outside corners** and turn at **inside corners** without falling off.
+- **JUMP** kicks off toward where you look (wall-to-wall jumps). Sprint up a wall and you fly off the top; JUMP right as you clear a ledge for a **ledge launch**.
+
+**Realistic city rendering**
+- Real-time sun shadows from every building, tree and rooftop prop.
+- Interior-mapped windows, so you see actual rooms with furniture behind the glass, lit up at night. Fresnel sky reflections and sun glints on glass towers.
+- Brick, concrete and glass facades with ledges, cornices, window frames, sills and rain streaks.
+- Height fog with sun-scattered golden haze, a sky with lit clouds, HDR bloom on lights, filmic tone mapping and color grading.
+- Graphics presets (Low / Medium / High) plus automatic resolution scaling, so it stays smooth on slower phones.
 
 **A city that's alive**
 - A 1.3 km procedural island city with a downtown skyline, a landmark 300 m tower, parks, plazas, a waterfront and a suspension bridge.
-- Traffic with buses and taxis that obeys traffic lights, turns at intersections, keeps its distance, and stops and honks if you stand in the road.
-- Pedestrians walk the sidewalks, cheer and jump when you land near them, and dodge you when you sprint past.
-- Pigeon flocks scatter as you swing through, a news helicopter circles (with a spotlight at night), plus an advertising blimp and boats in the bay.
-- A full day/night cycle with sunsets, stars, lit windows, street lights, glowing storefronts, and fireworks over the bay at night.
+- Traffic with buses and taxis that obeys lights, turns at intersections, and stops and honks if you stand in the road.
+- Pedestrians walk the sidewalks and cheer when you land near them. Pigeons scatter, a news helicopter circles (with a spotlight at night), and there's a blimp and boats in the bay.
+- Street furniture: hydrants, trash cans, mailboxes, news boxes, benches.
+- A full day/night cycle with lit windows, street lights, glowing storefronts, and fireworks over the bay at night.
 - 40 hidden 🎈 balloons to collect.
 
 **Delivery jobs**
-- 🍕 **Pizza delivery** (3 pizza shops): pick up 1–3 orders and deliver to rooftops or front doors before the timer runs out. Hard crashes ruin the pizza, and customers tip for speed and condition.
-- 📰 **Newspaper routes** (2 newsstands): throw papers at subscribers' doorsteps and rooftops while you swing past. THROW auto-aims, with bonuses for bullseyes and streaks.
-- Spend earnings on upgrades (web range, swing power, zip speed) and new suits.
-- Progress saves automatically.
+- 🍕 **Pizza delivery** (3 pizza shops): deliver 1–3 orders to rooftops or front doors before time runs out. Hard crashes ruin the pizza.
+- 📰 **Newspaper routes** (2 newsstands): throw papers at doorsteps and rooftops as you swing past. Throws auto-aim, with bonuses for bullseyes and streaks.
+- Earnings buy upgrades (web range, swing power, zip speed) and suits. Progress saves automatically.
 
 ## Controls
 
@@ -51,13 +55,12 @@ Every model, texture and sound is generated in code.
 |---|---|---|
 | Drag on left side | WASD | Move / steer swings |
 | Drag on right side | Mouse | Look around |
-| Hold **SWING** (slide finger to steer camera) | Hold Left-click / Shift | Shoot web & swing (release to let go) |
-| **JUMP** | Space | Jump, wall-jump, leap off a swing |
+| Hold **SWING** (slide finger to look/steer) | Hold Left-click / Shift | Shoot web & swing (release to let go) |
+| **JUMP** | Space | Jump, wall-jump (toward where you look), leap off a swing, ledge launch |
 | Hold **JUMP** in the air | Hold Space | Dive |
 | Tap **JUMP** in the air | Tap Space | Trick |
-| **ZIP** | E | Zip to the targeted ledge |
+| **ZIP** | E | Zip to the targeted ledge, or web-zip boost in mid-air |
 | **THROW** | F | Throw a newspaper (on a route) |
-| 👁 | V | First / third person |
 | Minimap | M | City map |
 | Start-job button | Enter | Start a delivery in a 🍕/📰 ring |
 | ⏸ / Back button | Esc | Pause, shop, settings |
@@ -94,8 +97,8 @@ src/
   player.js        movement state machine + swing/wall-run/zip physics
   world.js         collision world (AABB grid, raycasts, body movement)
   city.js          procedural city, building/road/water shaders, props, bridge
-  camera.js        third-person + first-person cameras, viewmodel arms
-  character.js     procedural hero model and animation
+  camera.js        first-person camera + IK arms/hands
+  character.js     hero blob shadow (legacy body model)
   web.js           web line rendering (shoot, taut/slack, dangling strands)
   traffic.js       cars, buses, traffic lights
   pedestrians.js   crowds (GPU-animated limbs)
@@ -106,6 +109,8 @@ src/
   audio.js         procedural WebAudio sound effects
   hud.js           HUD, minimap, objective markers
   sky.js           sky dome + day/night lighting
+  shadows.js       static sun shadow map
+  post.js          bloom, tone mapping, speed blur, arm depth pass
 www/               index.html (UI) + built game.js — shipped inside the APK
 android/           native Android wrapper (WebView, immersive full-screen)
 release/           prebuilt APK

@@ -6,7 +6,7 @@
 //   zip     - point-zip toward a targeted ledge
 import * as THREE from 'three';
 import { PHYS, CITY } from './config.js';
-import { clamp, damp } from './util.js';
+import { clamp, damp, angleDiff } from './util.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -26,7 +26,12 @@ export class Player {
     this.nextSide = 1;
     this.zip = { target: new THREE.Vector3(), perch: false, nx: 0, nz: 0, time: 0, launchQueued: false, box: null };
     this.zipCandidate = { valid: false, target: new THREE.Vector3(), perch: false, nx: 0, nz: 0, box: null };
-    this.wall = { nx: 0, nz: 0, box: null, time: 0, climbing: false };
+    this.wall = { nx: 0, nz: 0, box: null, time: 0, climbing: false, vertical: true };
+    this.vaultT = 0;
+    this.airZipCD = 0;
+    this.airZipT = 0;
+    this.airZipTarget = new THREE.Vector3();
+    this.camRight = new THREE.Vector3(1, 0, 0);
     this.diving = false;
     this.flipT = -1; this.flipDur = 0.6; this.flipDir = 1;
     this.twistT = -1;
@@ -95,8 +100,12 @@ export class Player {
     this.moveDir.set(fx * input.move.y + rx * input.move.x, 0, fz * input.move.y + rz * input.move.x);
     if (this.moveDir.lengthSq() > 1) this.moveDir.normalize();
     cam.getForward(this.camFwd);
+    this.camRight.set(rx, 0, rz);
 
     // timers
+    this.vaultT = Math.max(0, this.vaultT - dt);
+    this.airZipCD -= dt;
+    this.airZipT = Math.max(0, this.airZipT - dt);
     this.swingCooldown -= dt;
     this.wallCooldown -= dt;
     this.coyote -= dt;
@@ -211,6 +220,12 @@ export class Player {
         this.addStyle(40, 'POINT LAUNCH');
         this.emit('launch');
       }
+    } else if (s === 'air' && this.vaultT > 0) {
+      // jump right as you clear a ledge: launch off the rooftop edge
+      this.vel.set(this.camFwd.x * 12, 15.5, this.camFwd.z * 12);
+      this.vaultT = 0;
+      this.addStyle(35, 'LEDGE LAUNCH');
+      this.emit('launch');
     } else if (s === 'wall') {
       this.wallJump();
     } else if (s === 'swing') {
@@ -223,7 +238,7 @@ export class Player {
   onJumpReleased() {
     if (this.state === 'air' && this.jumpHeldT < 0.2 && this.airTime > 0.25 && this.flipT < 0 && this.twistT < 0 && !this.diving) {
       // quick tap in the air = trick
-      if (Math.random() < 0.5) this.flip(0.6); else this.twistT = 0;
+      this.twistT = 0; // barrel roll
       this.addStyle(25, 'TRICK');
       this.emit('trick');
     }
@@ -243,7 +258,7 @@ export class Player {
     if (out.lengthSq() < 1e-4) out.set(Math.sin(this.facing), 0, Math.cos(this.facing));
     out.normalize();
     if (sh > 4) {
-      out.multiplyScalar(0.6).add(_d.set(this.vel.x / sh, 0, this.vel.z / sh).multiplyScalar(0.4)).normalize();
+      out.multiplyScalar(0.75).add(_d.set(this.vel.x / sh, 0, this.vel.z / sh).multiplyScalar(0.25)).normalize();
     }
     if (this.moveDir.lengthSq() > 0.04) {
       out.multiplyScalar(0.35).addScaledVector(this.moveDir, 0.65).normalize();
@@ -333,7 +348,22 @@ export class Player {
     // but pull it toward our line of travel, so the pendulum carries us down the
     // street instead of slamming us sideways into the wall the web is stuck to.
     const sh = Math.hypot(this.vel.x, this.vel.z);
-    const dx = sh > 3 ? this.vel.x / sh : D.x, dz = sh > 3 ? this.vel.z / sh : D.z;
+    let dx = D.x, dz = D.z;
+    if (sh > 3) {
+      const vx = this.vel.x / sh, vz = this.vel.z / sh;
+      const ll = Math.hypot(this.camFwd.x, this.camFwd.z);
+      let ux = ll > 0.1 ? this.camFwd.x / ll : vx, uz = ll > 0.1 ? this.camFwd.z / ll : vz;
+      const ang = Math.acos(clamp(vx * ux + vz * uz, -1, 1));
+      const maxA = 0.95;
+      if (ang > maxA) {
+        const sgn = Math.sign(vx * uz - vz * ux) || 1;
+        const c = Math.cos(maxA), si = Math.sin(maxA) * sgn;
+        ux = vx * c - vz * si; uz = vx * si + vz * c;
+      }
+      dx = vx * 0.4 + ux * 0.6; dz = vz * 0.4 + uz * 0.6;
+      const dl = Math.hypot(dx, dz) || 1;
+      dx /= dl; dz /= dl;
+    }
     const rx = a.x - this.pos.x, rz = a.z - this.pos.z;
     const along = rx * dx + rz * dz;
     const lx = rx - dx * along, lz = rz - dz * along;
@@ -457,7 +487,11 @@ export class Player {
 
   tryZip() {
     const c = this.zipCandidate;
-    if (!c.valid || this.state === 'zip') return;
+    if (this.state === 'zip') return;
+    if (!c.valid) {
+      if ((this.state === 'air' || this.state === 'swing') && this.airZipCD <= 0) this.airZip();
+      return;
+    }
     if (this.rope.active) {
       this.rope.active = false;
       this.emit('release', { side: this.rope.side, anchor: this.rope.anchor.clone(), kind: 'zip' });
@@ -491,14 +525,82 @@ export class Player {
     this.emit('zip', { target: z.target.clone() });
   }
 
+  // Web-zip: fire a line ahead and yank yourself forward (mid-air boost).
+  airZip() {
+    const f = this.camFwd;
+    if (this.rope.active) this.release('zip');
+    const sp = this.vel.length();
+    const push = Math.max(sp, 16) * 0.7 + 12;
+    this.vel.multiplyScalar(0.3);
+    this.vel.x += f.x * push;
+    this.vel.y += f.y * push * 0.8 + 4;
+    this.vel.z += f.z * push;
+    const hit = this.world.raycast(this.pos.x, this.pos.y + 0.5, this.pos.z, f.x, f.y, f.z, 70, _hit);
+    if (hit) this.airZipTarget.set(hit.x, hit.y, hit.z);
+    else this.airZipTarget.copy(this.pos).addScaledVector(f, 45);
+    this.state = 'air';
+    this.diving = false;
+    this.airZipCD = 0.9;
+    this.airZipT = 0.3;
+    this.addStyle(15, 'WEB ZIP');
+    this.emit('airzip', { target: this.airZipTarget.clone() });
+  }
+
+  // Kick off the wall toward where you're looking (always away from the wall).
   wallJump() {
     const w = this.wall;
-    this.vel.set(w.nx * 9 + this.camFwd.x * 4, 10, w.nz * 9 + this.camFwd.z * 4);
+    const f = this.camFwd;
+    let jx = f.x, jy = Math.max(f.y, -0.1), jz = f.z;
+    const away = jx * w.nx + jz * w.nz;
+    if (away < 0.45) { jx += w.nx * (0.45 - away) * 1.6; jz += w.nz * (0.45 - away) * 1.6; }
+    const l = Math.hypot(jx, jy, jz) || 1;
+    const up = Math.max(0, this.vel.y) * 0.45;
+    this.vel.set((jx / l) * 14, (jy / l) * 14 + 6 + up, (jz / l) * 14);
     this.state = 'air';
     this.wallCooldown = 0.35;
-    this.flip(0.55);
+    this.flip(0.5);
     this.addStyle(20, 'WALL JUMP');
     this.emit('jump');
+  }
+
+  ledgeVault(cu) {
+    const w = this.wall;
+    if (cu > 15) {
+      // sprinted up the wall: fly off the top with your momentum
+      this.vel.set(-w.nx * 4 + this.camFwd.x * 3, cu * 0.72 + 3, -w.nz * 4 + this.camFwd.z * 3);
+      this.addStyle(25, 'LEDGE LAUNCH');
+      this.emit('launch');
+    } else {
+      this.vel.set(-w.nx * 5.5, 6.8, -w.nz * 5.5);
+      this.vaultT = 0.4;
+      this.emit('vault');
+    }
+    this.state = 'air';
+    this.wallCooldown = 0.3;
+  }
+
+  // Running sideways off the end of a wall: wrap around the building corner.
+  tryCornerWrap(ca) {
+    const w = this.wall, b = w.box, p = this.pos, hw = PHYS.HALF_W;
+    if (!b || p.y < b.minY + 0.6 || p.y > b.maxY - 0.2) return false;
+    const s = Math.sign(ca);
+    const mx = -w.nz * s, mz = w.nx * s; // movement direction = adjacent face normal
+    let x = p.x, z = p.z;
+    if (mx > 0.5) x = b.maxX + hw + 0.03; else if (mx < -0.5) x = b.minX - hw - 0.03;
+    if (mz > 0.5) z = b.maxZ + hw + 0.03; else if (mz < -0.5) z = b.minZ - hw - 0.03;
+    if (w.nx > 0.5) x = b.maxX - 0.45; else if (w.nx < -0.5) x = b.minX + 0.45;
+    if (w.nz > 0.5) z = b.maxZ - 0.45; else if (w.nz < -0.5) z = b.minZ + 0.45;
+    if (Math.hypot(x - p.x, z - p.z) > 2.5) return false;
+    if (this.world.overlaps(x, p.y, z, hw, PHYS.HALF_H)) return false;
+    p.x = x; p.z = z;
+    const speed = Math.abs(ca);
+    const dx = -w.nx, dz = -w.nz; // keep circling the building
+    this.vel.set(dx * speed - mx * 2, this.vel.y, dz * speed - mz * 2);
+    const delta = angleDiff(Math.atan2(-mx, -mz), Math.atan2(-dx, -dz));
+    w.nx = mx; w.nz = mz;
+    this.emit('corner', { delta });
+    this.addStyle(15, 'CORNER');
+    return true;
   }
 
   enterWall(nx, nz, box, impact) {
@@ -512,9 +614,22 @@ export class Player {
     const w = this.wall;
     const was = this.state;
     w.nx = nx; w.nz = nz; w.box = box; w.time = 0;
-    // convert horizontal momentum into vertical run (parkour)
-    const inSpeed = impact;
-    this.vel.y = Math.max(this.vel.y, Math.min(26, inSpeed * 0.75 + (was === 'ground' ? 4 : 2)));
+    // Momentum carries onto the wall: head-on hits turn into a run straight up,
+    // glancing hits keep you running along the wall.
+    const v = this.vel;
+    const tx = -nz, tz = nx;
+    const along = v.x * tx + v.z * tz;
+    let ca, cu;
+    if (Math.abs(along) < impact * 1.1 || was === 'ground') {
+      cu = Math.max(v.y, Math.min(28, impact * 0.8 + (was === 'ground' ? 4.5 : 2)));
+      ca = along * 0.4;
+    } else {
+      cu = Math.max(v.y * 0.6, 2.5);
+      ca = along;
+    }
+    v.set(tx * ca, cu, tz * ca);
+    w.vertical = Math.abs(cu) >= Math.abs(ca);
+    w.climbing = true;
     if (this.rope.active) {
       this.rope.active = false;
       this.emit('release', { side: this.rope.side, anchor: this.rope.anchor.clone(), kind: 'wall' });
@@ -582,8 +697,25 @@ export class Player {
     }
   }
 
+  lookSteer(h, k) {
+    const v = this.vel;
+    const ll = Math.hypot(this.camFwd.x, this.camFwd.z);
+    const vh = Math.hypot(v.x, v.z);
+    if (ll < 0.1 || vh < 4) return;
+    const ux = this.camFwd.x / ll, uz = this.camFwd.z / ll, vx = v.x / vh, vz = v.z / vh;
+    const dot = ux * vx + uz * vz;
+    if (dot < -0.1) return;
+    const px = ux - vx * dot, pz = uz - vz * dot;
+    v.x += px * k * h;
+    v.z += pz * k * h;
+    const nh = Math.hypot(v.x, v.z) || 1;
+    v.x *= vh / nh;
+    v.z *= vh / nh;
+  }
+
   stepAir(h) {
     const v = this.vel;
+    this.lookSteer(h, PHYS.LOOK_STEER * 0.45);
     v.y -= PHYS.GRAVITY * h * (this.diving ? 1.35 : 1);
     this.applyDrag(h, this.diving ? PHYS.DIVE_DRAG : PHYS.DRAG);
     // air control: steer without adding much speed
@@ -654,9 +786,11 @@ export class Player {
       v.y += (-n.y * dn) * PHYS.SWING_STEER * h;
       v.z += (md.z - n.z * dn) * PHYS.SWING_STEER * h;
     }
+    // first-person steering: the swing leans toward where you look
+    this.lookSteer(h, PHYS.LOOK_STEER);
     // swing assist: keep the momentum flowing through the bottom of the arc
     const sp = v.length();
-    if (sp > 1 && sp < 42 && dist >= r.length - 0.5 && v.y < 0) {
+    if (sp > 1 && sp < 50 && dist >= r.length - 0.5 && v.y < 0) {
       const below = clamp(-n.y, 0, 1);
       const k = this.stats.power * h * (0.4 + 0.6 * below);
       v.multiplyScalar(1 + k / sp);
@@ -710,62 +844,84 @@ export class Player {
     }
   }
 
-  stepWall(h) {
+  // Wall-running is look-directed: forward runs where you look (projected on
+  // the wall, looking at the wall = up), strafe runs sideways. Momentum from
+  // the entry carries over and decays to the base running speed.
+  stepWall(h, input) {
     const w = this.wall;
     const v = this.vel;
     w.time += h;
-    const md = this.moveDir;
-    const mag = md.length();
-    const tx = -w.nz, tz = w.nx; // along-wall axis
-    const up = mag > 0.05 ? -(md.x * w.nx + md.z * w.nz) : 0;
-    const side = mag > 0.05 ? md.x * tx + md.z * tz : 0;
-    if (up < -0.55 && w.time > 0.15) {
-      // pushing away from the wall: let go
-      this.vel.set(w.nx * 4, 1, w.nz * 4);
+    const nx = w.nx, nz = w.nz;
+    const tx = -nz, tz = nx;
+    const f = this.camFwd;
+    const lookIn = -(f.x * nx + f.z * nz);
+    let fa = f.x * tx + f.z * tz;
+    let fu = f.y + Math.max(0, lookIn) * 0.8;
+    let fl = Math.hypot(fa, fu);
+    if (fl < 1e-3) { fa = 0; fu = 1; fl = 1; }
+    fa /= fl; fu /= fl;
+    const ra = this.camRight.x * tx + this.camRight.z * tz;
+    const iy = input.move.y, ix = input.move.x;
+    if (lookIn < -0.35 && iy > 0.6 && w.time > 0.15) {
+      // looking away from the wall and pushing forward: hop off it
+      v.set(f.x * 9 + nx * 4, Math.max(v.y, 0) + 4, f.z * 9 + nz * 4);
       this.state = 'air';
-      this.wallCooldown = 0.4;
+      this.wallCooldown = 0.35;
+      this.emit('jump');
       return;
     }
-    let ty = 0;
-    if (up > 0.2) ty = PHYS.WALL_RUN * Math.min(1, up * 1.2);
-    else if (up < -0.2) ty = -PHYS.WALL_RUN * 0.7;
-    const momentum = v.y > ty ? damp(1.6, h) : damp(8, h);
-    v.y += (ty - v.y) * momentum;
-    const along = v.x * tx + v.z * tz;
-    const ta = side * 7;
-    const na = along + (ta - along) * damp(6, h);
-    v.x = tx * na - w.nx * 2;
-    v.z = tz * na - w.nz * 2;
-    w.climbing = Math.abs(v.y) > 1.5 || Math.abs(na) > 1.5;
+    const dA = fa * iy + ra * ix;
+    const dU = fu * iy;
+    const dl = Math.hypot(dA, dU);
+    const run = PHYS.WALL_RUN * Math.min(1, Math.hypot(ix, iy));
+    let ta = 0, tu = 0;
+    if (dl > 0.08) { ta = (dA / dl) * run; tu = (dU / dl) * run; }
+    // running sideways you slowly lose height, then slide off
+    if (dl > 0.08 && Math.abs(dA) / dl > 0.72) tu = Math.min(tu, -0.8 - clamp(w.time - 1.4, 0, 1) * 5);
+    let ca = v.x * tx + v.z * tz, cu = v.y;
+    const cs = Math.hypot(ca, cu), ts = Math.hypot(ta, tu);
+    const same = cs > 0.1 && ts > 0.1 && (ca * ta + cu * tu) / (cs * ts) > 0.7;
+    const rate = same && cs > ts ? 1.3 : 7;
+    ca += (ta - ca) * damp(rate, h);
+    cu += (tu - cu) * damp(rate, h);
+    v.set(tx * ca - nx * 2, cu, tz * ca - nz * 2);
+    const sp = Math.hypot(ca, cu);
+    w.climbing = sp > 1.2;
+    w.vertical = Math.abs(cu) >= Math.abs(ca);
     if (w.climbing) {
-      this.runPhase += Math.hypot(v.y, na) * h * (Math.PI * 2 / 2.4);
-      this.stepAcc += Math.abs(v.y) * h;
-      if (this.stepAcc > 1.3) { this.stepAcc = 0; this.emit('step', { speed: 10 }); }
+      this.runPhase += sp * h * ((Math.PI * 2) / 2.4);
+      this.stepAcc += sp * h;
+      if (this.stepAcc > 1.25) { this.stepAcc = 0; this.emit('step', { speed: sp, wall: true }); }
     }
     const c = this.move(h);
     const b = w.box;
-    if (c.ground && v.y <= 0) {
+    if (c.ground && cu <= 0.5) {
       this.state = 'ground';
       return;
     }
-    if (b && this.pos.y - PHYS.HALF_H * 0.3 > b.maxY) {
-      // reached the top: vault onto the roof
-      this.vel.set(-w.nx * 6, 6.5, -w.nz * 6);
-      this.state = 'air';
-      this.wallCooldown = 0.3;
-      this.addStyle(10, null);
-      this.emit('vault');
+    if (b && cu > 0 && this.pos.y - PHYS.HALF_H * 0.3 > b.maxY) {
+      this.ledgeVault(cu);
       return;
     }
     if (!c.wall) {
-      // ran past the edge of the wall
+      if (Math.abs(ca) > 2 && this.tryCornerWrap(ca)) return;
       this.state = 'air';
       this.wallCooldown = 0.2;
       return;
     }
-    if (c.wallBox && c.wallBox !== b) w.box = c.wallBox;
-    if (c.wallNX !== w.nx || c.wallNZ !== w.nz) {
-      w.nx = c.wallNX; w.nz = c.wallNZ;
+    if (c.wallBox) w.box = c.wallBox;
+    if (c.wallNX !== nx || c.wallNZ !== nz) {
+      // inner corner: only turn onto the new wall if we were running into it
+      const mx = tx * Math.sign(ca), mz = tz * Math.sign(ca);
+      if (Math.abs(ca) > 1.5 && c.wallNX * mx + c.wallNZ * mz < -0.5) {
+        const speed = Math.abs(ca);
+        const ntx = -c.wallNZ, ntz = c.wallNX;
+        const dir = Math.sign(nx * ntx + nz * ntz) || 1; // continue away from the old wall
+        this.vel.set(ntx * speed * dir, this.vel.y, ntz * speed * dir);
+        const delta = angleDiff(Math.atan2(-mx, -mz), Math.atan2(-nx, -nz));
+        w.nx = c.wallNX; w.nz = c.wallNZ;
+        this.emit('corner', { delta });
+      }
     }
   }
 

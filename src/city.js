@@ -4,6 +4,7 @@ import { CITY } from './config.js';
 import { Rng, vnoise, clamp } from './util.js';
 import { env, LIGHT_CHUNK, makeLitMaterial } from './shaders.js';
 import { GeoBuilder, xform, makeInstanced } from './geo.js';
+import { castShadow } from './shadows.js';
 
 export const roadC = (k) => -CITY.HALF + k * CITY.PITCH;
 export const blockC = (i) => roadC(i) + CITY.PITCH / 2;
@@ -290,8 +291,42 @@ export class City {
     geo.setAttribute('aBParams', new THREE.InstancedBufferAttribute(params, 4));
     geo.setAttribute('aBExtra', new THREE.InstancedBufferAttribute(extra, 4));
     mesh.frustumCulled = false;
-    this.scene.add(mesh);
+    this.scene.add(castShadow(mesh));
     this.buildingMesh = mesh;
+    this.buildCornices();
+  }
+
+  // Stone cornices / metal caps around every tier top: strong silhouettes.
+  buildCornices() {
+    const strips = [];
+    for (const t of this.tiers) {
+      const glass = t.style === STYLE.GLASS;
+      const o = glass ? 0.12 : 0.3, inner = glass ? 0.35 : 0.7, hgt = glass ? 0.35 : 0.65;
+      const c = glass ? [0.42, 0.45, 0.48] : [Math.min(1, t.color[0] * 1.18 + 0.05), Math.min(1, t.color[1] * 1.18 + 0.05), Math.min(1, t.color[2] * 1.18 + 0.05)];
+      const y = t.maxY + 0.1 - hgt / 2;
+      const w = t.maxX - t.minX + o * 2, d = t.maxZ - t.minZ + o * 2;
+      const cx = (t.minX + t.maxX) / 2, cz = (t.minZ + t.maxZ) / 2;
+      const dz = (d - (o + inner)) / 2, dx = (w - (o + inner)) / 2;
+      strips.push([cx, y, cz - dz, w, hgt, o + inner, c], [cx, y, cz + dz, w, hgt, o + inner, c]);
+      strips.push([cx - dx, y, cz, o + inner, hgt, d - 2 * (o + inner), c], [cx + dx, y, cz, o + inner, hgt, d - 2 * (o + inner), c]);
+      // a slim ledge band at mid height on masonry buildings
+      if (!glass && t.maxY - t.minY > 20 && t.minY < 1) {
+        const ly = t.minY + Math.round((t.maxY - t.minY) * 0.08 / t.floorH) * t.floorH + 0.1;
+        const lc = [c[0] * 0.95, c[1] * 0.95, c[2] * 0.95];
+        strips.push([cx, ly, t.minZ - 0.1, w - 0.4, 0.35, 0.4, lc], [cx, ly, t.maxZ + 0.1, w - 0.4, 0.35, 0.4, lc]);
+        strips.push([t.minX - 0.1, ly, cz, 0.4, 0.35, d - 0.4, lc], [t.maxX + 0.1, ly, cz, 0.4, 0.35, d - 0.4, lc]);
+      }
+    }
+    const gb = new GeoBuilder();
+    gb.add(new THREE.BoxGeometry(1, 1, 1), { color: 0xffffff });
+    const mesh = makeInstanced(gb.build(), makeLitMaterial({ emitDay: 0, emitNight: 0 }), strips.length, { colors: true });
+    const m = new THREE.Matrix4(), col = new THREE.Color(), q = new THREE.Quaternion();
+    strips.forEach((st, k) => {
+      m.compose(new THREE.Vector3(st[0], st[1], st[2]), q, new THREE.Vector3(st[3], st[4], st[5]));
+      mesh.setMatrixAt(k, m);
+      mesh.setColorAt(k, col.setRGB(st[6][0], st[6][1], st[6][2]));
+    });
+    this.scene.add(castShadow(mesh));
   }
 
   makeBuildingMaterial() {
@@ -330,81 +365,175 @@ export class City {
         varying vec3 vCol;
         varying vec4 vP;
         varying vec4 vE;
+
+        // anti-aliased box mask on [a,b]
+        float aaBand(float x, float a, float b, float w) {
+          return smoothstep(a - w, a + w, x) * (1.0 - smoothstep(b - w, b + w, x));
+        }
+
+        // Interior mapping: ray-march a virtual room behind the window.
+        // ro = point on the window plane in room space, rd = view ray (z into the room)
+        vec3 roomColor(vec3 ro, vec3 rd, vec3 room, vec2 id, float lit, float daylight) {
+          vec3 tw;
+          tw.x = rd.x > 0.0 ? (room.x - ro.x) / rd.x : -ro.x / min(rd.x, -1e-4);
+          tw.y = rd.y > 0.0 ? (room.y - ro.y) / rd.y : -ro.y / min(rd.y, -1e-4);
+          tw.z = room.z / max(rd.z, 1e-3);
+          float t = min(tw.x, min(tw.y, tw.z));
+          vec3 hp = ro + rd * t;
+          float r1 = hash12(id * 1.37);
+          float r2 = hash12(id * 2.71 + 5.0);
+          vec3 wallC = mix(vec3(0.78, 0.74, 0.66), mix(vec3(0.55, 0.62, 0.7), vec3(0.75, 0.6, 0.5), r2), step(0.55, r1));
+          vec3 c;
+          if (t == tw.z) {
+            c = wallC * 0.92;
+            // furniture / shelves silhouette on the back wall
+            float fx = hp.x / room.x;
+            if (hp.y < room.y * (0.3 + r2 * 0.25) && abs(fx - (0.3 + r1 * 0.4)) < 0.22) c = mix(vec3(0.25, 0.2, 0.17), vec3(0.4, 0.42, 0.46), r2) ;
+            if (hp.y > room.y * 0.45 && hp.y < room.y * 0.75 && abs(fx - (0.7 - r1 * 0.4)) < 0.12) c = vec3(0.2 + r2 * 0.5, 0.3, 0.45 - r2 * 0.2); // picture
+          } else if (t == tw.y) {
+            c = rd.y > 0.0 ? vec3(0.86, 0.85, 0.82) : mix(vec3(0.4, 0.3, 0.22), vec3(0.32, 0.33, 0.36), r1);
+          } else {
+            c = wallC * 0.8;
+          }
+          float depth = clamp(hp.z / room.z, 0.0, 1.0);
+          // daytime: rooms are dim compared to outside. night: lights on or off
+          vec3 dayLight = vec3(0.32, 0.33, 0.36) * daylight * (1.0 - depth * 0.45);
+          vec3 lamp = mix(vec3(1.0, 0.78, 0.5), vec3(0.8, 0.88, 1.0), step(0.8, r2)) * 1.45;
+          float ceilGlow = (t == tw.y && rd.y > 0.0) ? 1.35 : 1.0;
+          vec3 nightL = lamp * lit * ceilGlow * (1.0 - depth * 0.35);
+          return c * (dayLight + nightL * uNight + 0.03);
+        }
+
         void main() {
           vec3 n = normalize(vN);
           vec3 base = vCol;
           vec3 col;
-          vec3 emit = vec3(0.0);
+          vec3 V = normalize(vW - cameraPosition);
+          float distCam = length(vW - cameraPosition);
           if (n.y > 0.5) {
-            // Roof: tar/gravel with a lighter parapet rim.
+            // Roof: tar/gravel, lighter parapet rim, vents
             float g = hash12(floor(vW.xz * 1.5));
             vec2 e = vSize.xz * 0.5 - abs(vLocal.xz);
-            float rim = 1.0 - step(0.7, min(e.x, e.y));
-            col = mix(vec3(0.33, 0.33, 0.34) + g * 0.05, base * 1.05, rim);
-            col = applyLight(col, n);
+            float rim = 1.0 - step(0.6, min(e.x, e.y));
+            vec3 roof = vec3(0.3, 0.3, 0.31) + g * 0.05 + vnoise2(vW.xz * 0.15) * 0.06;
+            col = mix(roof, base * 1.05, rim);
+            col = applyLightS(col, n, shadowAt(vW, n));
           } else if (n.y < -0.5) {
             col = applyLight(base * 0.4, n);
           } else {
-            float style = vP.x;
+            float style = floor(vP.x + 0.5);
+            // varyings are slightly jittered by interpolation: snap before hashing
+            float seed = floor(vP.y * 10.0 + 0.5) * 0.1;
             float floorH = vP.z;
             float winW = vP.w;
             bool xFace = abs(n.x) > 0.5;
-            float h = xFace ? vLocal.z : vLocal.x;
+            vec3 T = vec3(-n.z, 0.0, n.x); // horizontal tangent (right when facing the wall)
+            float u = dot(vLocal, T);
             float width = xFace ? vSize.z : vSize.x;
+            u += width * 0.5;
             float yLocal = vLocal.y + vSize.y * 0.5;
             float cols = max(1.0, floor(width / winW));
             float spacing = width / cols;
-            vec2 cell = vec2(floor((h + width * 0.5) / spacing), floor(yLocal / floorH));
-            vec2 f = vec2(fract((h + width * 0.5) / spacing), fract(yLocal / floorH));
-            vec4 wr; // window rect x0,x1,y0,y1
-            if (style < 0.5) wr = vec4(0.05, 0.95, 0.1, 0.96);
-            else if (style < 1.5) wr = vec4(0.14, 0.86, 0.28, 0.86);
-            else if (style < 2.5) wr = vec4(0.26, 0.74, 0.25, 0.8);
-            else wr = vec4(0.22, 0.78, 0.16, 0.9);
-            float win = step(wr.x, f.x) * step(f.x, wr.y) * step(wr.z, f.y) * step(f.y, wr.w);
+            vec2 g = vec2(u / spacing, yLocal / floorH);
+            vec2 cell = floor(g);
+            vec2 f = fract(g);
+            vec2 fw = fwidth(g);
+            vec4 wr;
+            if (style < 0.5) wr = vec4(0.04, 0.96, 0.12, 0.97);
+            else if (style < 1.5) wr = vec4(0.14, 0.86, 0.3, 0.86);
+            else if (style < 2.5) wr = vec4(0.27, 0.73, 0.26, 0.8);
+            else wr = vec4(0.22, 0.78, 0.18, 0.9);
+            float win = aaBand(f.x, wr.x, wr.y, fw.x) * aaBand(f.y, wr.z, wr.w, fw.y);
+            float coverage = (wr.y - wr.x) * (wr.w - wr.z);
+            float far = smoothstep(0.18, 0.5, max(fw.x, fw.y));
             float topGap = vSize.y - yLocal;
-            float isGroundTier = vE.z;
-            bool groundFloor = isGroundTier > 0.5 && yLocal < floorH * 1.2;
-            if (topGap < 1.2) win = 0.0; // parapet band
-            // corner pilasters for masonry buildings
-            float edgeDist = width * 0.5 - abs(h);
-            if (style > 0.5 && edgeDist < 0.6) win = 0.0;
-            float rnd = hash12(cell + vP.y);
-            vec3 wall = base * (0.92 + 0.08 * hash12(vec2(cell.y, vP.y)));
-            if (style > 2.5 && fract((h + width * 0.5) / spacing) < 0.1) wall *= 1.12;
-            if (topGap < 1.2) wall *= 1.12;
-            vec3 V = normalize(vW - cameraPosition);
-            float fres = pow(1.0 - abs(dot(V, n)), 2.0);
-            vec3 sky = mix(uFogColor, uSkyAmb * 1.4, 0.4);
-            vec3 glassBase = style < 0.5 ? base * 0.55 : vec3(0.12, 0.15, 0.2);
-            vec3 glass = mix(glassBase, sky, 0.25 + 0.55 * fres);
-            glass *= 0.85 + 0.3 * rnd * (1.0 - uNight);
-            if (groundFloor) {
-              // storefront: big windows, lit signage at night
-              float sf = step(0.06, f.x) * step(f.x, 0.94) * step(0.06, yLocal / floorH) * step(yLocal / floorH, 0.72);
-              win = sf;
-              glass = mix(vec3(0.1, 0.12, 0.14), sky, 0.3 * fres + 0.1);
-              float hue = hash12(vec2(cell.x, vP.y * 3.1));
-              vec3 shop = 0.5 + 0.5 * cos(6.2831 * (hue + vec3(0.0, 0.33, 0.67)));
-              emit = win * mix(vec3(1.0, 0.85, 0.6), shop, 0.35) * (0.25 + 0.95 * uNight);
-              if (yLocal / floorH > 0.78 && yLocal / floorH < 0.98) {
-                wall = mix(wall, shop * 0.8, 0.85);
-                emit += shop * 0.5 * uNight;
-              }
+            bool groundFloor = vE.z > 0.5 && yLocal < floorH * 1.2;
+            float parapet = step(topGap, 1.1);
+            win *= 1.0 - parapet;
+            float edgeDist = width * 0.5 - abs(u - width * 0.5);
+            if (style > 0.5 && edgeDist < 0.7) win = 0.0;
+            float rnd = hash12(cell + seed);
+
+            // ---- wall material
+            vec3 wall = base * (0.93 + 0.07 * hash12(vec2(cell.y, seed)));
+            float detail = 1.0 - smoothstep(25.0, 70.0, distCam);
+            if (style > 1.5 && style < 2.5) {
+              // brick courses
+              float by = yLocal / 0.14;
+              float bx = (u + step(0.5, fract(by * 0.5)) * 0.22) / 0.44;
+              float mortar = max(1.0 - aaBand(fract(by), 0.12, 1.0, fwidth(by)), 1.0 - aaBand(fract(bx), 0.06, 1.0, fwidth(bx)));
+              wall *= 1.0 - mortar * 0.22 * detail;
+              wall *= 0.9 + 0.2 * hash12(floor(vec2(bx, by))) * detail;
+            } else if (style > 0.5) {
+              // concrete: floor slab bands + panel joints
+              float slab = 1.0 - aaBand(f.y, 0.07, 1.0, fw.y);
+              wall *= 1.0 + slab * 0.1;
+              wall *= 0.95 + vnoise2(vec2(u, yLocal) * 0.8) * 0.1 * detail;
             } else {
-              float litW = step(1.0 - vE.x, rnd) * uNight;
-              vec3 warm = mix(vec3(1.0, 0.78, 0.45), vec3(0.75, 0.85, 1.0), step(0.82, hash12(cell * 1.7 + vP.y)));
-              emit = win * litW * warm * (0.7 + 0.5 * hash12(cell + 3.0));
+              // glass tower: dark spandrel panels between floors
+              wall = base * 0.55;
             }
-            vec3 albedo = mix(wall, glass, win);
-            col = applyLight(albedo, n);
-            // sun glint on glass
+            if (style > 2.5 && fract(g.x) < 0.1) wall *= 1.14; // art-deco piers
+            // window frame + sill
+            float frame = aaBand(f.x, wr.x - 0.03, wr.y + 0.03, fw.x) * aaBand(f.y, wr.z - 0.04, wr.w + 0.02, fw.y) - win;
+            wall = mix(wall, wall * 0.62, clamp(frame, 0.0, 1.0) * (style < 0.5 ? 0.0 : 1.0));
+            float sill = aaBand(f.y, wr.z - 0.07, wr.z - 0.02, fw.y) * aaBand(f.x, wr.x - 0.04, wr.y + 0.04, fw.x);
+            wall = mix(wall, wall * 1.25 + 0.05, sill * step(0.5, style) * (1.0 - parapet));
+            // rain streaks / grime
+            float streak = vnoise2(vec2(u * 1.7, yLocal * 0.05 + seed));
+            wall *= 1.0 - smoothstep(0.55, 0.9, streak) * 0.16 * (1.0 - far);
+            if (parapet > 0.5) wall = wall * 1.12 + 0.02;
+
+            // ---- windows: reflection + interior
+            float cosV = max(dot(-V, n), 0.0);
+            float F = (style < 0.5 ? 0.25 : 0.06) + (1.0 - (style < 0.5 ? 0.25 : 0.06)) * pow(1.0 - cosV, 5.0);
             vec3 R = reflect(V, n);
-            float spec = pow(max(dot(R, uSunDir), 0.0), 40.0) * win * (1.0 - uNight);
-            col += uSunColor * spec * 0.6;
+            vec3 refl = skyColor(R);
+            // reflections of the street / other buildings below the horizon
+            refl = mix(refl, uFogColor * 0.45 + uGroundAmb * 0.3, smoothstep(0.08, -0.2, R.y));
+            float litW = step(1.0 - vE.x, rnd);
+            vec3 glassTint = style < 0.5 ? base * 1.2 + 0.1 : vec3(0.85, 0.9, 0.92);
+            vec3 inside;
+            if (uInterior > 0.5 && far < 0.99 && win > 0.01) {
+              vec3 rd = vec3(dot(V, T), V.y, -dot(V, n));
+              float roomD = floorH * 1.4;
+              vec3 ro = vec3(f.x * spacing, f.y * floorH, 0.0);
+              inside = roomColor(ro, normalize(rd), vec3(spacing, floorH, roomD), cell + seed, litW, 1.0 - uNight);
+              // blinds on some windows
+              float wv = (f.y - wr.z) / (wr.w - wr.z);
+              float blind = step(hash12(cell * 3.1 + seed), 0.35) * step(1.0 - hash12(cell * 1.9 + seed) * 0.6, wv);
+              inside = mix(inside, vec3(0.75, 0.72, 0.65) * (0.35 * (1.0 - uNight) + litW * uNight * 1.2), blind);
+              inside = mix(inside, vec3(0.05, 0.06, 0.08) + litW * uNight * vec3(0.9, 0.7, 0.45) * 0.5, far);
+            } else {
+              inside = vec3(0.06, 0.07, 0.09) + litW * uNight * vec3(1.0, 0.78, 0.48) * (0.7 + 0.5 * hash12(cell + 3.0));
+            }
+            vec3 glass = mix(inside, refl * glassTint, F);
+            float sh = shadowAt(vW, n);
+            glass += uSunColor * pow(max(dot(R, uSunDir), 0.0), 120.0) * 2.5 * sh * (1.0 - uNight);
+            vec3 emit = vec3(0.0);
+
+            if (groundFloor) {
+              // storefronts: big windows + glowing signage
+              float sf = aaBand(f.x, 0.06, 0.94, fw.x) * aaBand(yLocal / floorH, 0.06, 0.72, fw.y);
+              win = sf;
+              float hue = hash12(vec2(cell.x, seed * 3.1));
+              vec3 shop = 0.5 + 0.5 * cos(6.2831 * (hue + vec3(0.0, 0.33, 0.67)));
+              vec3 shopIn = mix(vec3(0.9, 0.85, 0.75), shop, 0.3) * (0.35 + 0.9 * uNight);
+              glass = mix(shopIn, refl, F * 0.8);
+              float fv = yLocal / floorH;
+              if (fv > 0.78 && fv < 0.98) {
+                wall = mix(wall, shop * 0.75, 0.85);
+                emit += shop * 0.7 * uNight * (0.6 + 0.4 * step(0.5, fract(u * 0.25)));
+              }
+            }
+            win = mix(win, coverage, far);
+            glass = mix(glass, mix(vec3(0.07, 0.08, 0.1), refl * glassTint, 0.35) + litW * uNight * vec3(1.0, 0.78, 0.5) * 0.55, far * (1.0 - float(groundFloor)));
+            vec3 wallLit = applyLightS(wall, n, sh);
+            // glass is not diffusely lit; it shows reflection + interior
+            vec3 glassLit = glass * mix(1.0, 0.85, 1.0 - sh);
+            col = mix(wallLit, glassLit, win) + emit;
             // ambient occlusion near the street
-            col *= mix(0.55, 1.0, smoothstep(0.0, 14.0, vW.y));
-            col += emit;
+            col *= mix(0.6, 1.0, smoothstep(0.0, 12.0, vW.y));
           }
           col = applyFog(col, vW);
           gl_FragColor = vec4(col, 1.0);
@@ -526,7 +655,22 @@ export class City {
               col = vec3(0.42, 0.41, 0.4) + rough;
             }
           }
-          col = applyLight(col, vec3(0.0, 1.0, 0.0));
+          float sh = shadowAt(vW, vec3(0.0, 1.0, 0.0));
+          // contact darkening along building bases (lots start at the sidewalk's inner edge)
+          if (!outside) {
+            float toLot = min(du.x, du.y) - (uRoad * 0.5 + uSide);
+            float inLot = step(0.0, toLot) * step(0.5, 1.0 - float(roadX || roadZ));
+            float ao = smoothstep(-2.5, 0.0, toLot) * (1.0 - inLot);
+            col *= 1.0 - ao * 0.35;
+          }
+          col = applyLightS(col, vec3(0.0, 1.0, 0.0), sh);
+          // asphalt sheen toward the low sun
+          if ((roadX || roadZ) && !outside) {
+            vec3 V = normalize(vW - cameraPosition);
+            vec3 nn = normalize(vec3((vnoise2(p * 3.0) - 0.5) * 0.08, 1.0, (vnoise2(p * 3.0 + 7.0) - 0.5) * 0.08));
+            float sp = pow(max(dot(reflect(V, nn), uSunDir), 0.0), 18.0);
+            col += uSunColor * sp * 0.22 * sh * (1.0 - uNight);
+          }
           // street lamp pools at night
           float pool = 0.0;
           if (!outside) {
@@ -678,7 +822,8 @@ export class City {
       col.setRGB(rng.float(0.8, 1.1), rng.float(0.85, 1.15), rng.float(0.7, 1.0));
       treeMesh.setColorAt(k, col);
     });
-    this.scene.add(treeMesh);
+    this.scene.add(castShadow(treeMesh));
+    this.buildStreetFurniture(rng);
 
     // Traffic light poles at every intersection corner (heads coloured by traffic.js)
     this.signals = [];
@@ -692,6 +837,73 @@ export class City {
         this.signals.push({ x: x - o2, z: z + o2, axis: 0, rot: -Math.PI / 2 });
         this.signals.push({ x: x + o2, z: z - o2, axis: 0, rot: Math.PI / 2 });
       }
+    }
+  }
+
+  buildStreetFurniture(rng) {
+    const N = CITY.N;
+    const curb = CITY.BLOCK / 2 - 1.5;
+    const kinds = {
+      hydrant: (gb) => {
+        gb.add(new THREE.CylinderGeometry(0.17, 0.2, 0.75, 8), { color: 0xc8281e, matrix: xform(0, 0.375, 0) });
+        gb.add(new THREE.SphereGeometry(0.19, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), { color: 0xc8281e, matrix: xform(0, 0.75, 0) });
+        gb.add(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 6), { color: 0xd6b02a, matrix: xform(0, 0.5, 0, 0, 0, Math.PI / 2) });
+      },
+      trash: (gb) => {
+        gb.add(new THREE.CylinderGeometry(0.3, 0.26, 0.95, 10), { color: 0x2b4a36, matrix: xform(0, 0.475, 0) });
+        gb.add(new THREE.CylinderGeometry(0.33, 0.33, 0.06, 10), { color: 0x1c2a22, matrix: xform(0, 0.97, 0) });
+      },
+      mailbox: (gb) => {
+        gb.add(new THREE.BoxGeometry(0.5, 0.75, 0.5), { color: 0x2456a6, matrix: xform(0, 0.62, 0) });
+        gb.add(new THREE.CylinderGeometry(0.25, 0.25, 0.5, 10, 1, false, 0, Math.PI), { color: 0x2456a6, matrix: xform(0, 1.0, 0, Math.PI / 2, 0, Math.PI / 2) });
+        for (const [x, z] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) gb.add(new THREE.BoxGeometry(0.05, 0.25, 0.05), { color: 0x1a1a1a, matrix: xform(x, 0.12, z) });
+      },
+      newsbox: (gb) => {
+        gb.add(new THREE.BoxGeometry(0.55, 0.95, 0.45), { color: 0xd63a2a, matrix: xform(0, 0.6, 0) });
+        gb.add(new THREE.BoxGeometry(0.45, 0.35, 0.02), { color: 0xd8dde2, emit: 0.2, matrix: xform(0, 0.8, 0.235) });
+        gb.add(new THREE.BoxGeometry(0.4, 0.15, 0.4), { color: 0x2a2a2a, matrix: xform(0, 0.07, 0) });
+      },
+      bench: (gb) => {
+        gb.add(new THREE.BoxGeometry(1.8, 0.07, 0.45), { color: 0x7a5232, matrix: xform(0, 0.46, 0) });
+        gb.add(new THREE.BoxGeometry(1.8, 0.4, 0.06), { color: 0x7a5232, matrix: xform(0, 0.75, -0.22, -0.15, 0, 0) });
+        for (const x of [-0.75, 0.75]) gb.add(new THREE.BoxGeometry(0.06, 0.46, 0.45), { color: 0x222222, matrix: xform(x, 0.23, 0) });
+      },
+    };
+    const place = { hydrant: [], trash: [], mailbox: [], newsbox: [], bench: [] };
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N; j++) {
+        const b = this.blocks[i][j];
+        const sides = [
+          (a) => [b.cx + a, b.cz - curb, Math.PI], (a) => [b.cx + a, b.cz + curb, 0],
+          (a) => [b.cx - curb, b.cz + a, -Math.PI / 2], (a) => [b.cx + curb, b.cz + a, Math.PI / 2],
+        ];
+        for (const sd of sides) {
+          // corner hydrant
+          if (rng.chance(0.55)) place.hydrant.push(sd(rng.chance(0.5) ? -40 : 40));
+          for (const a of [-15, 15]) {
+            const r = rng.next();
+            const at = sd(a + rng.float(-4, 4));
+            if (r < 0.35) place.trash.push(at);
+            else if (r < 0.5) place.mailbox.push(at);
+            else if (r < 0.62) place.newsbox.push(at);
+            else if (r < 0.72 && (b.type !== BLOCK_BUILT || b.height < 60)) place.bench.push(at);
+          }
+        }
+      }
+    }
+    const mat = makeLitMaterial({ emitDay: 0.1, emitNight: 0.6 });
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    for (const [k, list] of Object.entries(place)) {
+      if (!list.length) continue;
+      const gb = new GeoBuilder();
+      kinds[k](gb);
+      const mesh = makeInstanced(gb.build(), mat, list.length);
+      list.forEach(([x, z, rot], idx) => {
+        q.setFromAxisAngle(up, rot);
+        m.compose(new THREE.Vector3(x, 0, z), q, one);
+        mesh.setMatrixAt(idx, m);
+      });
+      this.scene.add(mesh);
     }
   }
 
@@ -713,7 +925,7 @@ export class City {
       boxMesh.setColorAt(k, col.setRGB(b.c[0], b.c[1], b.c[2]));
       if (b.collide) this.world.addBox(b.x - b.w / 2, b.y - b.h / 2, b.z - b.d / 2, b.x + b.w / 2, b.y + b.h / 2, b.z + b.d / 2, null);
     });
-    this.scene.add(boxMesh);
+    this.scene.add(castShadow(boxMesh));
 
     // Water towers
     const tw = new GeoBuilder();
@@ -729,7 +941,7 @@ export class City {
       const r = 2.3 * t.s;
       this.world.addBox(t.x - r, t.y + 4 * t.s, t.z - r, t.x + r, t.y + 10 * t.s, t.z + r, null);
     });
-    this.scene.add(towerMesh);
+    this.scene.add(castShadow(towerMesh));
 
     // Antennas with aircraft warning lights
     const an = new GeoBuilder();
@@ -745,7 +957,7 @@ export class City {
       m.compose(v.set(a.x, a.y + a.h, a.z), q.identity(), s.set(w, w, w));
       ltMesh.setMatrixAt(k, m);
     });
-    this.scene.add(anMesh, ltMesh);
+    this.scene.add(castShadow(anMesh), ltMesh);
 
     // Billboards with fictional ads
     const ads = makeAdTextures();
@@ -769,7 +981,7 @@ export class City {
       const hw = b.rotY === 0 ? b.len / 2 : 0.3, hd = b.rotY === 0 ? 0.3 : b.len / 2;
       this.world.addBox(b.x - hw, b.y + 3.9, b.z - hd, b.x + hw, b.y + 8.5, b.z + hd, null);
     });
-    this.scene.add(frameMesh);
+    this.scene.add(castShadow(frameMesh));
   }
 
   buildBridge() {
@@ -821,7 +1033,7 @@ export class City {
     cable(towers[0], towers[1], towerH, towerH, 95);
     cable(towers[1], x0 + len, towerH, deckY + 4, 30);
     const mesh = new THREE.Mesh(gb.build(), makeLitMaterial({ emitDay: 0, emitNight: 0 }));
-    this.scene.add(mesh);
+    this.scene.add(castShadow(mesh));
     this.landmarks.bridge = { x0, len, z, deckY };
   }
 

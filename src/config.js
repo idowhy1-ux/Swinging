@@ -13,30 +13,31 @@ CITY.SHORE = CITY.EDGE + 28; // waterfront railing
 CITY.WATER_Y = -2.5;
 
 export const PHYS = {
-  GRAVITY: 24,
-  DRAG: 0.0032, // quadratic air drag coefficient
+  GRAVITY: 25,
+  DRAG: 0.003, // quadratic air drag coefficient
   DIVE_DRAG: 0.0016,
-  MAX_SPEED: 80,
+  MAX_SPEED: 90,
   RUN: 8.5,
   SPRINT: 13,
   GROUND_ACCEL: 12,
   AIR_ACCEL: 7,
   JUMP: 11.5,
-  ROPE_MAX: 85,
+  ROPE_MAX: 90,
   ROPE_MIN: 6,
-  SWING_ASSIST: 4.5,
+  SWING_ASSIST: 6,
   SWING_STEER: 9,
-  ZIP_SPEED: 48,
-  WALL_RUN: 11,
+  ZIP_SPEED: 52,
+  WALL_RUN: 12.5,
+  LOOK_STEER: 11,
   HALF_W: 0.32,
   HALF_H: 0.9,
 };
 
 // Upgrade tables (index = level).
 export const UPGRADES = {
-  range: { name: 'Web Range', desc: 'Longer web lines', values: [85, 97, 110, 124], prices: [150, 320, 650] },
-  power: { name: 'Swing Power', desc: 'More momentum per swing', values: [4.5, 6, 7.5, 9], prices: [200, 420, 800] },
-  zip: { name: 'Zip Speed', desc: 'Faster point-zips', values: [48, 58, 68, 80], prices: [150, 320, 650] },
+  range: { name: 'Web Range', desc: 'Longer web lines', values: [90, 102, 115, 128], prices: [150, 320, 650] },
+  power: { name: 'Swing Power', desc: 'More momentum per swing', values: [6, 7.5, 9, 10.5], prices: [200, 420, 800] },
+  zip: { name: 'Zip Speed', desc: 'Faster point-zips', values: [52, 62, 72, 84], prices: [150, 320, 650] },
 };
 
 export const SUITS = [

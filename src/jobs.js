@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { CITY } from './config.js';
 import { Rng, clamp } from './util.js';
 import { blockC } from './city.js';
+import { castShadow } from './shadows.js';
 
 const PIZZA_COLOR = 0xff8a1f;
 const PAPER_COLOR = 0x3fd0ff;
@@ -213,7 +214,7 @@ export class Jobs {
     stack.position.set(0, 0.25, -1.35);
     g.add(body, roof, sign, stack);
     g.position.set(spot.x, 0, spot.z);
-    this.scene.add(g);
+    this.scene.add(castShadow(g));
     this.game.world.addBox(spot.x - 1.3, 0, spot.z - 1.0, spot.x + 1.3, 2.9, spot.z + 1.0, null);
   }
 
@@ -427,8 +428,7 @@ export class Jobs {
     if (!a || a.type !== 'paper' || a.papers <= 0) return false;
     const p = this.papers.find((q) => !q.active) || this.papers[0];
     const player = this.game.player;
-    const start = this._v.copy(player.pos);
-    start.y += 0.5;
+    const start = this.game.cam.handWorld(1, this._v);
     const camF = player.camFwd;
     // auto-aim: best target in front of the camera within range
     let best = null, bs = Infinity;

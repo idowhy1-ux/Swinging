@@ -18,23 +18,25 @@ import { Input } from './input.js';
 import { Hud } from './hud.js';
 import { Jobs } from './jobs.js';
 import { env } from './shaders.js';
+import { Shadows } from './shadows.js';
+import { PostFX, VIEWMODEL_LAYER } from './post.js';
 import { loadSave, writeSave } from './save.js';
 import { clamp } from './util.js';
 
 THREE.ColorManagement.enabled = false;
 
 const QUALITY = {
-  low: { ratio: 0.8, far: 1100, fog: 1.35, aa: false },
-  med: { ratio: 1.2, far: 1900, fog: 1.0, aa: false },
-  high: { ratio: 2.0, far: 4200, fog: 0.85, aa: true },
+  low: { ratio: 0.75, far: 1100, fog: 1.3, post: false, samples: 0, shadows: 0, interior: false },
+  med: { ratio: 1.0, far: 1900, fog: 1.0, post: true, samples: 0, shadows: 1536, interior: true },
+  high: { ratio: 1.6, far: 4200, fog: 0.9, post: true, samples: 4, shadows: 2048, interior: true },
 };
 const TIPS = [
   'Hold SWING near buildings to web-swing. Release to let go!',
   'Let go near the top of a swing for a PERFECT RELEASE speed boost.',
-  'Run into a wall to run straight up it. Jump to kick off.',
-  'Aim the crosshair at a ledge and press ZIP. Press JUMP as you land to launch!',
+  'Run into a wall to run up it. Look where you want to go: up, sideways, around corners.',
+  'JUMP on a wall kicks off toward where you look. JUMP as you clear a ledge to launch!',
+  'Aim at a ledge and press ZIP to zip there. ZIP in mid-air for a web-zip speed boost.',
   'Orange 🍕 and blue 📰 markers on the minimap are delivery jobs.',
-  'Tap the 👁 button to switch between first and third person.',
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -46,13 +48,21 @@ class Game {
     const S = this.save.settings;
     const q = QUALITY[S.quality] || QUALITY.med;
     this.canvas = $('game');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: q.aa, powerPreference: 'high-performance', stencil: false });
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.renderer.setClearColor(0x0e1424);
     this.scene = new THREE.Scene();
     this.world = new CollisionWorld();
     this.city = new City(this.scene, this.world);
     this.sky = new Sky(this.scene);
+    this.sky.sun.layers.enable(VIEWMODEL_LAYER);
+    this.sky.hemi.layers.enable(VIEWMODEL_LAYER);
+    // a touch of fill light just for the first-person arms
+    this.armFill = new THREE.AmbientLight(0xffffff, 0.35);
+    this.armFill.layers.set(VIEWMODEL_LAYER);
+    this.scene.add(this.armFill);
+    this.post = new PostFX(this.renderer);
+    this.shadows = new Shadows(this.renderer, q.shadows || 1536);
     this.cam = new CameraRig(this.scene);
     this.hero = new Hero(this.scene);
     this.player = new Player(this.world);
@@ -92,8 +102,6 @@ class Game {
     this.applySettings();
     this.applyUpgrades();
     this.applySuit();
-    this.cam.setMode(S.cam === 'first' ? 'first' : 'third');
-    this.cam.blend = 1;
     this.bindUI();
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
@@ -132,6 +140,13 @@ class Game {
     const S = this.save.settings;
     const q = QUALITY[S.quality] || QUALITY.med;
     this.quality = q;
+    this.post.configure({ enabled: q.post, samples: q.samples });
+    if (q.shadows && q.shadows !== this.shadows.size) {
+      this.shadows.rt.dispose();
+      this.shadows = new Shadows(this.renderer, q.shadows);
+    }
+    this.shadows.setEnabled(!!q.shadows);
+    env.uInterior.value = q.interior ? 1 : 0;
     this.cam.camera.far = q.far;
     this.cam.camera.updateProjectionMatrix();
     this.sky.fogScale = q.fog;
@@ -201,7 +216,6 @@ class Game {
     const click = (el, fn) => el.addEventListener('click', (e) => { e.stopPropagation(); this.sound.play('click'); fn(e); });
     click($('play'), () => this.startPlaying());
     click($('resume'), () => this.closeAllMenus());
-    click($('toggle-cam'), () => { this.toggleCamera(); this.updatePauseMenu(); });
     click($('respawn'), () => { this.player.teleport(this.spawn.x, this.spawn.y, this.spawn.z); this.closeAllMenus(); });
     click($('quit-job'), () => { this.jobs.cancel(); });
     click($('sum-ok'), () => this.closeAllMenus());
@@ -224,7 +238,9 @@ class Game {
     this.sound.init();
     this.sound.resume();
     $('title').classList.add('hidden');
+    document.body.classList.remove('on-title');
     this.state = 'play';
+    this.cam.smoothY = null;
     this.input.reset();
     this.last = performance.now();
     setTimeout(() => $('kb-hint').classList.add('fade'), 30000);
@@ -281,7 +297,6 @@ class Game {
   }
 
   updatePauseMenu() {
-    $('toggle-cam').textContent = `Camera: ${this.cam.mode === 'first' ? '1st' : '3rd'} person`;
     $('quit-job').style.display = this.jobs.active ? '' : 'none';
     const s = this.stats;
     $('stats-line').innerHTML = `🍕 Pizzas: <b>${s.pizzas}</b> · 📰 Papers: <b>${s.papers}</b> · 🎈 ${this.balloons.count}/${this.balloons.total} · Best combo: <b>${s.bestCombo}</b>`;
@@ -344,13 +359,6 @@ class Game {
     }
   }
 
-  toggleCamera() {
-    const m = this.cam.toggle();
-    $('cam-label').textContent = m === 'first' ? '1ST' : '3RD';
-    this.hud.toast(m === 'first' ? '👁 First-person view' : '🎥 Third-person view');
-    this.persist();
-  }
-
   onJobFinished(summary, cancelled) {
     if (this.menuStack.length) this.closeAllMenus();
     $('sum-title').textContent = summary.title;
@@ -364,7 +372,7 @@ class Game {
   // ---------------------------------------------------------- game events
   handleEvents() {
     const p = this.player;
-    const hand = (side) => (this.cam.mode === 'first' ? this.cam.handWorld(side, this.handTmp) : this.hero.handWorld(side, this.handTmp));
+    const hand = (side) => this.cam.handWorld(side, this.handTmp);
     for (const e of p.events) {
       switch (e.type) {
         case 'web':
@@ -372,6 +380,7 @@ class Game {
           this.ropeLine = this.webs.shoot(e.anchor, hand(e.side), p.rope.length);
           this.ropeLine.side = e.side;
           this.sound.play('web', { pan: e.side * 0.4 });
+          this.cam.kickFov(2.5);
           this.vibrate(12);
           break;
         case 'release':
@@ -396,6 +405,7 @@ class Game {
           break;
         case 'land':
           this.sound.play('land', { impact: e.impact });
+          this.cam.land(e.impact);
           if (e.impact > 12) this.fx.dust(e.x, e.y, e.z, Math.min(2, e.impact / 18));
           if (e.impact > 17) { this.cam.shake(Math.min(1, e.impact / 40)); this.vibrate(30); }
           if (e.impact > 14 && e.y < 1) this.peds.cheer(e.x, e.z, 16);
@@ -441,11 +451,35 @@ class Game {
           break;
         case 'step':
           this.sound.play('step');
+          if (e.wall) this.sound.play('jump');
+          break;
+        case 'airzip':
+          for (const l of this.zipLines) this.webs.release(l, p.vel);
+          this.zipLines = [this.webs.shoot(e.target, hand(1)), this.webs.shoot(e.target, hand(-1))];
+          this.zipLines[0].side = 1;
+          this.zipLines[1].side = -1;
+          this.airZipLines = this.zipLines;
+          this.sound.play('zip');
+          this.cam.kickFov(9);
+          this.cam.shake(0.25);
+          this.vibrate(18);
+          break;
+        case 'corner':
+          this.cam.turn(e.delta);
+          this.sound.play('whoosh');
+          break;
+        case 'vault':
+          this.cam.land(8);
+          this.sound.play('land', { impact: 8 });
           break;
         case 'jump': case 'vault':
           this.sound.play('jump');
           break;
-        case 'launch': case 'trick': case 'dive':
+        case 'launch':
+          this.cam.kickFov(10);
+          this.sound.play('whoosh');
+          break;
+        case 'trick': case 'dive':
           this.sound.play('whoosh');
           break;
         case 'wallLand':
@@ -458,6 +492,11 @@ class Game {
     }
     p.events.length = 0;
     // zip lines end when the zip does
+    if (this.airZipLines && p.airZipT <= 0) {
+      for (const l of this.airZipLines) this.webs.release(l, p.vel);
+      this.airZipLines = null;
+      this.zipLines = [];
+    }
     if (this.prevState === 'zip' && p.state !== 'zip') {
       for (const l of this.zipLines) this.webs.release(l, p.vel);
       this.zipLines = [];
@@ -471,8 +510,7 @@ class Game {
 
   updateWebStarts() {
     const p = this.player;
-    const fp = this.cam.mode === 'first';
-    const hw = (side, out) => (fp ? this.cam.handWorld(side, out) : this.hero.handWorld(side, out));
+    const hw = (side, out) => this.cam.handWorld(side, out);
     if (this.ropeLine && !p.rope.active) {
       this.webs.release(this.ropeLine, p.vel);
       this.ropeLine = null;
@@ -503,7 +541,6 @@ class Game {
     if (playing) {
       this.time += dt;
       if (I.pausePressed) this.openMenu('pause');
-      if (I.camPressed) this.toggleCamera();
       if (I.mapPressed) this.openMenu('map');
       if (I.actionPressed && this.jobs.canStart()) this.jobs.start();
       if (I.throwPressed) this.jobs.throwPaper();
@@ -549,15 +586,27 @@ class Game {
       this.ambient.update(dt, this.player);
       this.player.update(dt, IDLE_INPUT, this.cam);
       this.player.events.length = 0;
-      const a = this.time * 0.08;
+      // cinematic drone flyover around the skyline
+      const a = this.time * 0.035 + 2.2;
       const c = this.cam.camera;
-      c.position.set(this.player.pos.x + Math.cos(a) * 14, this.player.pos.y + 4.5, this.player.pos.z + Math.sin(a) * 14);
-      c.lookAt(this.player.pos.x, this.player.pos.y + 0.5, this.player.pos.z);
-      this.cam.yaw = Math.atan2(-(this.player.pos.x - c.position.x), -(this.player.pos.z - c.position.z));
-      this.cam.pitch = -0.15;
+      const tw = this.city.landmarks.tower;
+      c.position.set(tw.x + Math.cos(a) * 340, 120 + Math.sin(this.time * 0.11) * 25, tw.z + Math.sin(a) * 340);
+      c.lookAt(tw.x + Math.cos(a + 0.9) * 90, 95, tw.z + Math.sin(a + 0.9) * 90);
+      if (c.fov !== 70) { c.fov = 70; c.updateProjectionMatrix(); }
+      this.cam.vm.visible = false;
+      c.updateMatrixWorld();
     }
     env.uTime.value = this.time;
-    this.hero.setVisible(this.cam.mode !== 'first' || this.state === 'title');
+    this.hero.setVisible(false);
+    this.shadows.update(this.scene, this.state === 'title' ? this.cam.camera.position : this.player.pos, env.uSunDir.value, env.uNight.value);
+    // the arms use the built-in sun light: dim it when the hero stands in a building's shadow
+    if (this.state !== 'title') {
+      const sd = env.uSunDir.value, cp = this.cam.camera.position;
+      const blocked = env.uNight.value < 0.9 && this.world.raycast(cp.x, cp.y, cp.z, sd.x, sd.y, sd.z, 400, this.sunHit || (this.sunHit = {}));
+      const target = blocked ? 0.12 : 1.0;
+      this.armSun = (this.armSun ?? 1) + (target - (this.armSun ?? 1)) * Math.min(1, dt * 6);
+      this.sky.sun.intensity = this.armSun * 1.15;
+    }
     // suit stripes and visor glow softly at night
     this.hero.mats.accent.emissive.copy(this.hero.mats.accent.color);
     this.hero.mats.accent.emissiveIntensity = 0.08 + env.uNight.value * 0.55;
@@ -565,7 +614,8 @@ class Game {
     this.updateWebStarts();
     this.webs.update(dt, this.cam.camera.position);
     const sp = this.player.speed;
-    const fw = this.fx.update(dt, playing ? clamp((sp - 28) / 30, 0, 1) : 0, this.cam.camera.aspect, env.uNight.value);
+    const speedAmt = playing ? clamp((sp - 26) / 34, 0, 1) : 0;
+    const fw = this.fx.update(dt, speedAmt * (this.quality.post ? 0.45 : 1), this.cam.camera.aspect, env.uNight.value);
     if (fw && playing) this.sound.play('boom', { x: 1200, z: 0 });
     if (playing) {
       const c = this.cam.camera.position;
@@ -576,7 +626,7 @@ class Game {
       this.sound.update(dt, sp, this.player.pos.y, this.player.state);
       this.hud.update(dt, this);
     }
-    this.renderer.render(this.scene, this.cam.camera);
+    this.post.render(this.scene, this.cam.camera, { speed: speedAmt, time: this.time, night: env.uNight.value });
     this.trackPerf(raw);
   }
 
@@ -588,6 +638,14 @@ class Game {
       if (this.save.settings.fps) $('fps').textContent = `${Math.round(1 / avg)} fps · ${(this.renderer.getPixelRatio()).toFixed(2)}x`;
       // dynamic resolution keeps the game smooth on slower phones
       if (avg > 0.026 && this.dynScale > 0.55) { this.dynScale = Math.max(0.55, this.dynScale - 0.1); this.onResize(); }
+      else if (avg > 0.04 && this.dynScale <= 0.55 && this.state === 'play' && this.save.settings.quality !== 'low' && !this.autoLowered) {
+        // still struggling at minimum resolution: switch to the fast renderer once
+        this.autoLowered = true;
+        this.save.settings.quality = 'low';
+        this.applySettings();
+        this.persist();
+        this.hud.toast('Graphics set to Low for smoother play (change in Settings)', 'warn');
+      }
       else if (avg < 0.0165 && this.dynScale < 1) { this.dynScale = Math.min(1, this.dynScale + 0.05); this.onResize(); }
       this.frameAcc = 0;
       this.frameN = 0;

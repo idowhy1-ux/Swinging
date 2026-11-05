@@ -18,7 +18,7 @@ export class Sky {
   constructor(scene) {
     this.scene = scene;
     this.hour = 16.5; // start late afternoon
-    this.daySpeed = 1 / 30; // game hours per real second (12 min day)
+    this.daySpeed = 1 / 40; // game hours per real second (16 min day)
     this.zenith = new THREE.Color();
     this.horizon = new THREE.Color();
     const geo = new THREE.SphereGeometry(4000, 32, 16);
@@ -52,30 +52,38 @@ export class Sky {
           float a = h(vec3(i, 0.0)), b = h(vec3(i + vec2(1, 0), 0.0)), c = h(vec3(i + vec2(0, 1), 0.0)), d = h(vec3(i + vec2(1, 1), 0.0));
           return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
         }
+        float fbm(vec2 p) { return n2(p) * 0.5 + n2(p * 2.1) * 0.27 + n2(p * 4.3) * 0.15 + n2(p * 8.7) * 0.08; }
         void main() {
           vec3 d = normalize(vDir);
           float y = max(d.y, 0.0);
-          vec3 col = mix(uHorizon, uZenith, pow(y, 0.55));
-          if (d.y < 0.0) col = uHorizon * (1.0 + d.y * 1.5);
+          vec3 col = mix(uHorizon, uZenith, pow(y, 0.5));
+          if (d.y < 0.0) col = uHorizon * (1.0 + d.y * 1.2);
           float sd = max(dot(d, uSunDir), 0.0);
-          col += uSunColor * pow(sd, 8.0) * 0.35 * (1.0 - uNight);
-          col += uSunColor * smoothstep(0.9993, 0.9997, sd) * (1.0 - uNight);
-          // moon opposite to the sun
+          float day = 1.0 - uNight;
+          // Mie halo + horizon haze toward the sun
+          col += uSunColor * (pow(sd, 6.0) * 0.45 * (1.0 - y * 0.6) + pow(sd, 64.0) * 0.6) * day;
+          // HDR sun disk (blooms in post)
+          col += uSunColor * smoothstep(0.99935, 0.99975, sd) * 4.0 * day;
+          // moon
           float md = max(dot(d, -uSunDir), 0.0);
-          col += vec3(0.85, 0.9, 1.0) * smoothstep(0.9990, 0.9994, md) * uNight;
-          col += vec3(0.3, 0.35, 0.5) * pow(md, 30.0) * 0.3 * uNight;
+          col += vec3(0.9, 0.93, 1.0) * smoothstep(0.9991, 0.9995, md) * 1.6 * uNight;
+          col += vec3(0.3, 0.35, 0.5) * pow(md, 40.0) * 0.35 * uNight;
           // stars
-          vec3 sp = floor(d * 380.0);
-          float s = step(0.9975, h(sp)) * smoothstep(0.05, 0.3, d.y);
-          float tw = 0.6 + 0.4 * sin(uTime * 3.0 + h(sp + 1.0) * 30.0);
-          col += vec3(s * tw) * uNight;
-          // soft clouds
-          if (d.y > 0.02) {
-            vec2 cp = d.xz / (d.y + 0.15) * 2.0 + vec2(uTime * 0.01, 0.0);
-            float c = n2(cp) * 0.6 + n2(cp * 2.3) * 0.3 + n2(cp * 5.1) * 0.1;
-            c = smoothstep(0.55, 0.85, c) * smoothstep(0.02, 0.25, d.y);
-            vec3 cc = mix(uHorizon * 1.1 + uSunColor * 0.15, vec3(0.15, 0.17, 0.24), uNight);
-            col = mix(col, cc, c * 0.75);
+          vec3 sp = floor(d * 420.0);
+          float s = step(0.9978, h(sp)) * smoothstep(0.05, 0.35, d.y);
+          float tw = 0.55 + 0.45 * sin(uTime * 3.0 + h(sp + 1.0) * 30.0);
+          col += vec3(s * tw * 1.3) * uNight;
+          // clouds with sun-lit edges
+          if (d.y > 0.01) {
+            vec2 cp = d.xz / (d.y + 0.12) * 1.6 + vec2(uTime * 0.006, uTime * 0.002);
+            float c = fbm(cp);
+            float cov = smoothstep(0.5, 0.82, c) * smoothstep(0.01, 0.22, d.y);
+            float thick = smoothstep(0.62, 0.95, c);
+            vec3 lit = mix(uHorizon * 1.05, vec3(1.0), 0.35) + uSunColor * (0.35 + pow(sd, 4.0) * 0.9) * day;
+            vec3 shade = mix(uHorizon * 0.75, uZenith * 0.8, 0.4);
+            vec3 cc = mix(lit, shade, thick * 0.7);
+            cc = mix(cc, vec3(0.12, 0.14, 0.22) + uHorizon * 0.3, uNight);
+            col = mix(col, cc, cov * 0.82);
           }
           gl_FragColor = vec4(col, 1.0);
         }
@@ -113,9 +121,10 @@ export class Sky {
     this.zenith.copy(A.zen).lerp(B.zen, t);
     this.horizon.copy(A.hor).lerp(B.hor, t);
     env.uSunColor.value.copy(A.sun).lerp(B.sun, t);
-    env.uSkyAmb.value.copy(A.amb).lerp(B.amb, t).multiplyScalar(1.3);
-    env.uGroundAmb.value.copy(A.gnd).lerp(B.gnd, t).multiplyScalar(1.3);
+    env.uSkyAmb.value.copy(A.amb).lerp(B.amb, t).multiplyScalar(1.5);
+    env.uGroundAmb.value.copy(A.gnd).lerp(B.gnd, t).multiplyScalar(1.55);
     env.uFogColor.value.copy(this.horizon).lerp(this.zenith, 0.15);
+    env.uZenith.value.copy(this.zenith);
     env.uFogDensity.value = lerp(A.fog, B.fog, t) * this.fogScale;
     env.uNight.value = 1 - smoothstep(-0.12, 0.08, elev);
     if (elev < 0) {
