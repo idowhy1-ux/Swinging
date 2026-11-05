@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- web line from the corner of a building -->
+    <path android:strokeColor="#FFF4F7FF" android:strokeWidth="2.2" android:strokeLineCap="round"
+        android:pathData="M78,26 L52,58" />
+    <!-- hero silhouette -->
+    <path android:fillColor="#FFFF7A1A"
+        android:pathData="M52,56 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path android:fillColor="#FF23262E"
+        android:pathData="M46,62 L56,60 L60,72 L66,80 L62,83 L54,74 L50,82 L45,80 L48,70 Z" />
+    <path android:fillColor="#FF38E8FF"
+        android:pathData="M48.5,54.5 L56,54 L55.5,56.5 L48.8,57 Z" />
+    <!-- pizza box -->
+    <path android:fillColor="#FFFFC531" android:pathData="M38,62 L46,60 L47,66 L39,68 Z" />
+</vector>

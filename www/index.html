@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1424">
+<title>Skyline Courier</title>
+<style>
+:root {
+  --panel: rgba(12, 18, 34, 0.7);
+  --panel-solid: #121a30;
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #f4f6fb;
+  --muted: #a9b3c9;
+  --accent: #ff7a1a;
+  --accent2: #38e8ff;
+  --good: #5be37a;
+  --bad: #ff5a5a;
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1424; color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; }
+canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#touch { position: fixed; inset: 0; z-index: 1; }
+.hud { position: fixed; z-index: 3; pointer-events: none; }
+.btn, .menu, .menu * , #minimap { pointer-events: auto; }
+.hidden { display: none !important; }
+
+/* top-left stats */
+#stats { top: calc(8px + var(--sat)); left: calc(10px + var(--sal)); display: flex; gap: 6px; }
+.pill { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; font-weight: 700; font-size: 14px;
+  display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pill small { color: var(--muted); font-weight: 600; }
+#money { color: #ffd84d; }
+
+/* job panel */
+#job { top: calc(8px + var(--sat)); left: 50%; transform: translateX(-50%); width: min(310px, 42vw); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 7px 10px; }
+#job-title { font-weight: 800; font-size: 13px; letter-spacing: .3px; margin-bottom: 3px; }
+.order { display: flex; justify-content: space-between; font-size: 12.5px; padding: 2px 0; color: var(--text); }
+.order b { font-variant-numeric: tabular-nums; }
+.order.done { color: var(--good); text-decoration: line-through; opacity: .7; }
+.order.failed { color: var(--bad); text-decoration: line-through; opacity: .7; }
+.order.urgent b { color: var(--bad); animation: blink .6s infinite alternate; }
+@keyframes blink { to { opacity: .35; } }
+.bar { position: relative; height: 15px; border-radius: 8px; background: rgba(255,255,255,.12); margin-top: 4px; overflow: hidden; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; transition: width .3s; }
+.bar label { position: relative; font-size: 10.5px; font-weight: 700; padding-left: 7px; line-height: 15px; text-shadow: 0 1px 2px #000; }
+
+#toasts { top: calc(64px + var(--sat)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; width: 70vw; }
+#job:not([style*="none"]) ~ #toasts { top: calc(118px + var(--sat)); }
+.toast { background: rgba(10, 14, 26, .8); border-radius: 10px; padding: 6px 12px; font-size: 13.5px; font-weight: 650; text-align: center;
+  border-left: 4px solid var(--accent2); animation: tin .25s ease-out; transition: opacity .5s, transform .5s; max-width: 100%; }
+.toast.good { border-color: var(--good); } .toast.bad { border-color: var(--bad); } .toast.warn { border-color: #ffd166; } .toast.job { border-color: var(--accent); }
+.toast.style { border-color: #c77dff; font-size: 12.5px; }
+.toast.out { opacity: 0; transform: translateY(-8px); }
+@keyframes tin { from { opacity: 0; transform: translateY(8px) scale(.96); } }
+
+#combo { top: 38%; left: calc(14px + var(--sal)); font-size: 15px; font-weight: 800; letter-spacing: .5px; text-shadow: 0 2px 6px rgba(0,0,0,.7); color: #fff; }
+#combo b { font-size: 26px; color: #ffd84d; } #combo span { color: #c77dff; }
+
+/* minimap + top-right buttons */
+#minimap-wrap { top: calc(8px + var(--sat)); right: calc(10px + var(--sar)); display: flex; gap: 8px; align-items: flex-start; }
+#minimap { width: 118px; height: 118px; border-radius: 50%; box-shadow: 0 3px 14px rgba(0,0,0,.45); }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.small-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); display: grid; place-items: center; }
+.small-btn svg { width: 22px; height: 22px; }
+#cam-label { position: absolute; font-size: 9px; font-weight: 800; bottom: -12px; color: #fff; text-shadow: 0 1px 2px #000; }
+
+/* bottom-center */
+#speedo { bottom: calc(10px + var(--sab)); left: 50%; transform: translateX(-50%); text-align: center; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+#speed { font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+#speedo small { display: block; font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1px; }
+#btn-action { bottom: calc(58px + var(--sab)); left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #ff7a1a, #ff4f6d);
+  border-radius: 999px; padding: 11px 20px; font-weight: 800; font-size: 15px; box-shadow: 0 6px 20px rgba(255, 90, 60, .45); display: flex; gap: 8px; align-items: center;
+  animation: pulse 1.2s infinite alternate; }
+@keyframes pulse { to { box-shadow: 0 6px 28px rgba(255, 140, 60, .85); } }
+
+/* reticle + markers */
+#reticle { left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 4px #000; }
+#reticle.ready { background: var(--accent2); }
+#zip-mark { left: 0; top: 0; width: 26px; height: 26px; border: 3px solid var(--accent2); border-radius: 50%; box-shadow: 0 0 10px var(--accent2); }
+#zip-mark.perch { border-radius: 6px; transform-origin: center; border-color: #ffe14d; box-shadow: 0 0 10px #ffe14d; }
+#obj-mark { left: 0; top: 0; display: flex; flex-direction: column; align-items: center; }
+#obj-mark::before { content: ''; width: 18px; height: 18px; transform: rotate(45deg); border-radius: 3px; border: 3px solid #fff; background: var(--accent); margin-bottom: 4px; }
+#obj-mark.paper::before { background: var(--accent2); }
+#obj-arrow { left: 0; top: 0; display: flex; flex-direction: column; align-items: center; }
+#obj-arrow > div { width: 0; height: 0; border-top: 13px solid transparent; border-bottom: 13px solid transparent; border-left: 24px solid var(--accent); filter: drop-shadow(0 0 3px #000); }
+#obj-arrow.paper > div { border-left-color: var(--accent2); }
+#obj-dist { font-size: 12px; font-weight: 800; text-shadow: 0 1px 3px #000; margin-top: 2px; }
+
+/* touch controls */
+#controls { position: fixed; inset: 0; z-index: 2; pointer-events: none; display: none; }
+body.touch #controls { display: block; }
+body.touch #kb-hint { display: none; }
+.cbtn { position: absolute; border-radius: 50%; display: grid; place-items: center; background: rgba(15, 22, 40, .5); border: 2px solid rgba(255,255,255,.35);
+  pointer-events: auto; color: #fff; font-weight: 800; transition: transform .05s, background .1s; }
+.cbtn svg { width: 46%; height: 46%; }
+.cbtn span { position: absolute; bottom: 9%; font-size: 9px; letter-spacing: .5px; opacity: .85; }
+.cbtn.down { transform: scale(.92); background: rgba(255,255,255,.3); }
+#btn-swing { width: 104px; height: 104px; right: calc(22px + var(--sar)); bottom: calc(26px + var(--sab)); border-color: rgba(255,255,255,.5); }
+#btn-swing.ready { border-color: var(--accent2); box-shadow: 0 0 18px rgba(56, 232, 255, .55); }
+#btn-jump { width: 74px; height: 74px; right: calc(140px + var(--sar)); bottom: calc(22px + var(--sab)); }
+#btn-zip { width: 62px; height: 62px; right: calc(40px + var(--sar)); bottom: calc(146px + var(--sab)); }
+#btn-zip.ready { border-color: #ffe14d; box-shadow: 0 0 14px rgba(255, 225, 77, .5); }
+#btn-throw { width: 66px; height: 66px; right: calc(124px + var(--sar)); bottom: calc(112px + var(--sab)); border-color: var(--accent2); }
+#papers-left { position: absolute; top: -6px; right: -6px; background: var(--accent2); color: #000; border-radius: 999px; font-size: 11px; padding: 1px 6px; }
+#joy { position: fixed; z-index: 2; width: 128px; height: 128px; margin: -64px 0 0 -64px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3);
+  background: rgba(255,255,255,.07); display: none; pointer-events: none; }
+#joy-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.45); }
+#joy-hint { left: calc(40px + var(--sal)); bottom: calc(40px + var(--sab)); width: 110px; height: 110px; border-radius: 50%; border: 2px dashed rgba(255,255,255,.18);
+  display: none; place-items: center; font-size: 10px; color: rgba(255,255,255,.4); font-weight: 700; text-align: center; }
+body.touch #joy-hint { display: grid; }
+#kb-hint { top: calc(46px + var(--sat)); left: calc(12px + var(--sal)); max-width: 250px; font-size: 11.5px; color: var(--muted); line-height: 1.55; text-shadow: 0 1px 2px #000;
+  background: rgba(10,14,26,.45); padding: 6px 9px; border-radius: 10px; transition: opacity 1s; }
+#kb-hint.fade { opacity: 0; }
+#kb-hint b { color: #fff; }
+
+/* menus */
+.menu { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(6, 9, 18, .55);
+  backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); padding: calc(10px + var(--sat)) calc(10px + var(--sar)) calc(10px + var(--sab)) calc(10px + var(--sal)); }
+.card { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; width: min(520px, 94vw); max-height: 100%; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5); touch-action: pan-y; }
+.card h2 { margin: 0 0 10px; font-size: 20px; }
+.menu-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mbtn { background: rgba(255,255,255,.08); border: 1px solid var(--line); color: var(--text); border-radius: 12px; padding: 11px 12px; font-size: 15px; font-weight: 700;
+  font-family: inherit; text-align: center; cursor: pointer; }
+.mbtn:active { background: rgba(255,255,255,.2); }
+.mbtn.primary { background: linear-gradient(135deg, #ff7a1a, #ff4f6d); border: none; }
+.mbtn.wide { grid-column: span 2; }
+.mbtn:disabled { opacity: .4; }
+#title { background: radial-gradient(ellipse at 50% 120%, rgba(255,122,26,.35), rgba(6,9,18,.6) 60%); }
+#title .logo { font-size: clamp(30px, 7vw, 58px); font-weight: 900; letter-spacing: 2px; line-height: .95; text-align: center;
+  background: linear-gradient(180deg, #fff, #ffd2a8 55%, #ff7a1a); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 12px rgba(0,0,0,.5)); }
+#title .tag { text-align: center; color: var(--muted); font-weight: 600; margin: 6px 0 14px; }
+.title-inner { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 94vw); }
+.title-inner .menu-btns { width: min(360px, 90vw); }
+.how { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.how b { color: var(--text); }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.row:last-child { border-bottom: none; }
+.row input[type=range] { width: 46%; }
+.seg { display: flex; gap: 4px; }
+.seg button { background: rgba(255,255,255,.08); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 6px 10px; font-weight: 700; font-family: inherit; }
+.seg button.on { background: var(--accent); border-color: var(--accent); }
+.upg { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.upg .info { flex: 1; } .upg .info small { color: var(--muted); display: block; }
+.pips { display: flex; gap: 3px; margin-top: 4px; } .pips i { width: 18px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.18); } .pips i.on { background: var(--accent2); }
+.suits { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-top: 8px; }
+.suit { border: 2px solid var(--line); border-radius: 12px; padding: 8px 6px; text-align: center; font-size: 12px; font-weight: 700; background: rgba(255,255,255,.04); }
+.suit.on { border-color: var(--accent2); }
+.swatch { height: 30px; border-radius: 8px; margin-bottom: 5px; }
+#mapcanvas { width: min(88vh, 88vw); height: min(88vh, 88vw); border-radius: 12px; }
+#loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: #0e1424; font-weight: 800; letter-spacing: 1px; }
+.summary-lines { color: var(--muted); font-size: 14px; line-height: 1.7; margin-bottom: 10px; }
+.earned { font-size: 28px; font-weight: 900; color: #ffd84d; margin: 4px 0 12px; }
+#fps { bottom: calc(10px + var(--sab)); left: calc(12px + var(--sal)); font-size: 11px; color: var(--muted); }
+@media (max-height: 420px) {
+  #minimap { width: 96px; height: 96px; }
+  .small-btn { width: 40px; height: 40px; }
+  #btn-swing { width: 96px; height: 96px; }
+  #btn-zip { bottom: calc(134px + var(--sab)); }
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="touch"></div>
+
+<div id="stats" class="hud">
+  <div class="pill"><span id="money">$0</span></div>
+  <div class="pill">🎈 <span id="balloons">0/0</span></div>
+  <div class="pill"><small id="clock">--</small></div>
+</div>
+<div id="fps" class="hud hidden"></div>
+<div id="job" class="hud" style="display:none"><div id="job-title"></div><div id="job-body"></div></div>
+<div id="toasts" class="hud"></div>
+<div id="combo" class="hud" style="display:none"></div>
+<div id="minimap-wrap" class="hud">
+  <canvas id="minimap" width="236" height="236"></canvas>
+  <div class="col">
+    <div id="btn-pause" class="small-btn btn" title="Pause (Esc)"><svg viewBox="0 0 24 24" fill="#fff"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
+    <div id="btn-cam" class="small-btn btn" title="Camera (V)" style="position:relative"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span id="cam-label">3RD</span></div>
+  </div>
+</div>
+<div id="reticle" class="hud"></div>
+<div id="zip-mark" class="hud" style="display:none"></div>
+<div id="obj-mark" class="hud" style="display:none"></div>
+<div id="obj-arrow" class="hud" style="display:none"><div></div><span id="obj-dist"></span></div>
+<div id="speedo" class="hud"><span id="speed">0</span><small>KM/H</small></div>
+<div id="btn-action" class="hud btn" style="display:none"><span>📦</span><span id="action-label">Start job</span></div>
+<div id="kb-hint" class="hud"><b>WASD</b> move · <b>Mouse</b> look<br><b>Hold L-Click / Shift</b> swing<br><b>Space</b> jump · hold = dive<br><b>E</b> zip · <b>F</b> throw papers<br><b>Enter</b> start job · <b>V</b> camera<br><b>M</b> map · <b>Esc</b> menu</div>
+
+<div id="controls">
+  <div id="joy-hint" class="hud">MOVE<br>drag here</div>
+  <div id="btn-swing" class="cbtn"><svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"><path d="M40 6 L18 30"/><circle cx="15" cy="34" r="6" fill="#fff" stroke="none"/><path d="M34 6 L40 6 L40 12" /></svg><span>SWING</span></div>
+  <div id="btn-jump" class="cbtn"><svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 28 L24 14 L36 28"/><path d="M24 14 V40"/></svg><span>JUMP</span></div>
+  <div id="btn-zip" class="cbtn"><svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="3.4"><circle cx="24" cy="24" r="14"/><circle cx="24" cy="24" r="4" fill="#fff"/><path d="M24 4v8M24 36v8M4 24h8M36 24h8"/></svg><span>ZIP</span></div>
+  <div id="btn-throw" class="cbtn" style="display:none"><svg viewBox="0 0 48 48" fill="#fff"><rect x="10" y="14" width="28" height="20" rx="3"/><rect x="14" y="18" width="20" height="3" fill="#123"/><rect x="14" y="24" width="12" height="2" fill="#123"/><rect x="14" y="28" width="16" height="2" fill="#123"/></svg><span>THROW</span><b id="papers-left">0</b></div>
+</div>
+<div id="joy"><div id="joy-knob"></div></div>
+
+<!-- menus -->
+<div id="title" class="menu">
+  <div class="title-inner">
+    <div class="logo">SKYLINE<br>COURIER</div>
+    <div class="tag">Swing the city. Deliver on time.</div>
+    <div class="menu-btns">
+      <button class="mbtn primary wide" id="play">▶ PLAY</button>
+      <button class="mbtn" data-open="help">How to play</button>
+      <button class="mbtn" data-open="settings">Settings</button>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="menu hidden">
+  <div class="card">
+    <h2>Paused</h2>
+    <div class="menu-btns">
+      <button class="mbtn primary wide" id="resume">▶ Resume</button>
+      <button class="mbtn" id="toggle-cam">Camera: 3rd person</button>
+      <button class="mbtn" data-open="map">City map</button>
+      <button class="mbtn" data-open="shop">Shop &amp; suits</button>
+      <button class="mbtn" data-open="settings">Settings</button>
+      <button class="mbtn" data-open="help">How to play</button>
+      <button class="mbtn" id="respawn">Go to rooftop</button>
+      <button class="mbtn wide" id="quit-job">Cancel current job</button>
+    </div>
+    <div id="stats-line" class="summary-lines" style="margin:10px 0 0"></div>
+  </div>
+</div>
+
+<div id="settings" class="menu hidden">
+  <div class="card">
+    <h2>Settings</h2>
+    <div class="row"><span>Graphics</span><div class="seg" id="set-quality"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
+    <div class="row"><span>Look sensitivity</span><input type="range" id="set-sens" min="0.3" max="2.5" step="0.1"></div>
+    <div class="row"><span>Invert look Y</span><div class="seg" id="set-invert"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
+    <div class="row"><span>Hold-to-cruise (auto-chain webs)</span><div class="seg" id="set-chain"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
+    <div class="row"><span>Volume</span><input type="range" id="set-vol" min="0" max="1" step="0.05"></div>
+    <div class="row"><span>Vibration</span><div class="seg" id="set-vib"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
+    <div class="row"><span>Show FPS</span><div class="seg" id="set-fps"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
+    <div class="menu-btns" style="margin-top:10px"><button class="mbtn primary wide" data-back>Done</button></div>
+  </div>
+</div>
+
+<div id="shop" class="menu hidden">
+  <div class="card">
+    <h2>Shop <span style="float:right;color:#ffd84d" id="shop-money"></span></h2>
+    <div id="upgrades"></div>
+    <h2 style="margin-top:14px;font-size:16px">Suits</h2>
+    <div class="suits" id="suits"></div>
+    <div class="menu-btns" style="margin-top:12px"><button class="mbtn primary wide" data-back>Done</button></div>
+  </div>
+</div>
+
+<div id="help" class="menu hidden">
+  <div class="card">
+    <h2>How to play</h2>
+    <div class="how">
+      <div><b>Left side drag</b> – move / steer swings</div>
+      <div><b>Right side drag</b> – look around</div>
+      <div><b>Hold SWING</b> – shoot a web &amp; swing. Release to let go. Keep holding to cruise.</div>
+      <div><b>Release at the top of the arc</b> – "Perfect release" speed boost</div>
+      <div><b>JUMP while swinging</b> – leap off with a flip</div>
+      <div><b>Hold JUMP in the air</b> – dive to build speed</div>
+      <div><b>Tap JUMP in the air</b> – do a trick</div>
+      <div><b>Run into a wall</b> – wall-run straight up it</div>
+      <div><b>ZIP</b> – zip to the ledge under the crosshair. Press JUMP as you land for a point-launch!</div>
+      <div><b>👁 button</b> – switch first / third person</div>
+      <div><b>Jobs</b> – stand in an orange 🍕 or blue 📰 ring and tap the button</div>
+      <div><b>Pizza</b> – deliver on time; hard crashes ruin the pizza</div>
+      <div><b>Papers</b> – THROW auto-aims at the nearest subscriber</div>
+      <div><b>🎈 Balloons</b> – 40 hidden around the city</div>
+    </div>
+    <div class="menu-btns" style="margin-top:12px"><button class="mbtn primary wide" data-back>Got it</button></div>
+  </div>
+</div>
+
+<div id="map" class="menu hidden">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+    <canvas id="mapcanvas" width="900" height="900"></canvas>
+    <button class="mbtn primary" data-back style="min-width:160px">Close</button>
+  </div>
+</div>
+
+<div id="summary" class="menu hidden">
+  <div class="card" style="text-align:center">
+    <h2 id="sum-title">Done</h2>
+    <div class="earned" id="sum-earned"></div>
+    <div class="summary-lines" id="sum-lines"></div>
+    <div class="menu-btns"><button class="mbtn primary wide" id="sum-ok">Continue</button></div>
+  </div>
+</div>
+
+<div id="loading">BUILDING THE CITY…</div>
+<script src="game.js"></script>
+</body>
+</html>

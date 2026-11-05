@@ -1,0 +1,15 @@
+{
+  "name": "skyline-courier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Open-world web-swinging courier game for Android (Three.js + WebView)",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch --serve",
+    "apk": "node build.mjs && cd android && ./gradlew assembleDebug"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "three": "0.187.0"
+  }
+}
