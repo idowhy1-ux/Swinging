@@ -22,7 +22,17 @@ Every model, texture and sound is generated in code.
 - **Look to steer**: the swing curves toward where you look, so you can carve around corners. Hold SWING to cruise from web to web, or time your release at the top of the arc for a **PERFECT RELEASE** boost.
 - **Web-zip**: press ZIP in mid-air to yank yourself forward for a burst of speed. On a ledge under your crosshair, ZIP pulls you there instead; JUMP as you land for a **point launch**.
 - **Dive** (hold JUMP in the air) to build speed, then catch a web to turn the fall into forward speed.
-- Full-body first-person feel: IK arms with articulated fingers grab the web, plant on walls and pump as you run, plus head bob, landing dips, lean into swings, FOV kicks and speed blur.
+- **The camera swings with you**: the whole view rotates with the pendulum (looking up on the upswing, down on the backswing, banking into turns) and follows your direction of travel. Adjustable in Settings (Off / Normal / Strong).
+- Full-body first-person feel: IK arms with articulated fingers grab the web, plant on walls and pump as you run; look down to see your legs running, dangling on a swing or tucking into flips. Plus head bob, landing dips, FOV kicks and speed blur.
+
+**Air tricks**
+- A **TRICK** button that lights up only in the air (pressing it mid-swing lets go of the web first).
+- The stick picks the trick: forward = **front flip**, back = **backflip**, sideways = **barrel roll**, no stick = **360 spin, Superman, Starfish, Cannonball, Corkscrew, Twister**.
+- Every trick has its own camera move plus arm and leg animation. Chain tricks in one jump for multipliers (DOUBLE / TRIPLE …), but land mid-trick and you **bail**.
+
+**Realistic hero**
+- Anatomically shaped limbs lofted from cross-sections, hands with jointed fingers and knuckle guards, a fabric suit with seams and accent stripes, a glossy full-face helmet with a mirrored visor, pads, sneakers and a courier bag, all with physically based materials and reflections.
+- Shown in full on the title screen; in first person you see the arms, hands and legs.
 
 **Wall-running**
 - Run or swing into a building to stick to it. Look where you want to go: up the wall, sideways along it, or down. Entry speed carries over.
@@ -60,6 +70,7 @@ Every model, texture and sound is generated in code.
 | Hold **JUMP** in the air | Hold Space | Dive |
 | Tap **JUMP** in the air | Tap Space | Trick |
 | **ZIP** | E | Zip to the targeted ledge, or web-zip boost in mid-air |
+| **TRICK** (in the air) + stick direction | T (+ WASD) | Flips, rolls, spins and poses |
 | **THROW** | F | Throw a newspaper (on a route) |
 | Minimap | M | City map |
 | Start-job button | Enter | Start a delivery in a 🍕/📰 ring |
@@ -97,7 +108,9 @@ src/
   player.js        movement state machine + swing/wall-run/zip physics
   world.js         collision world (AABB grid, raycasts, body movement)
   city.js          procedural city, building/road/water shaders, props, bridge
-  camera.js        first-person camera + IK arms/hands
+  camera.js        first-person camera, swing tilt, trick moves, IK arms + legs
+  body.js          realistic procedural hero model, suit materials
+  tricks.js        air trick definitions
   character.js     hero blob shadow (legacy body model)
   web.js           web line rendering (shoot, taut/slack, dangling strands)
   traffic.js       cars, buses, traffic lights

@@ -15,7 +15,7 @@ export class Hud {
       combo: $('combo'), reticle: $('reticle'), zipMark: $('zip-mark'), objArrow: $('obj-arrow'),
       objMark: $('obj-mark'), objDist: $('obj-dist'), action: $('btn-action'), actionLabel: $('action-label'),
       swing: $('btn-swing'), zip: $('btn-zip'), throwBtn: $('btn-throw'), papers: $('papers-left'),
-      camLabel: $('cam-label'), hint: $('hint'),
+      camLabel: $('cam-label'), hint: $('hint'), trick: $('btn-trick'), trickLabel: $('trick-label'),
     };
     this.cache = {};
     this.mm = $('minimap');
@@ -49,6 +49,16 @@ export class Hud {
     while (this.el.toasts.children.length > 4) this.el.toasts.firstChild.remove();
     setTimeout(() => d.classList.add('out'), 2600);
     setTimeout(() => d.remove(), 3200);
+  }
+
+  trickText(name, sub, bail = false) {
+    const el = this.el.trickLabel;
+    el.firstChild.textContent = name;
+    el.lastChild.textContent = sub;
+    el.classList.toggle('bail', bail);
+    el.classList.remove('show');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('show');
   }
 
   buildMapImage() {
@@ -232,8 +242,11 @@ export class Hud {
       }
     } else this.show('job', E.job, false);
 
+    // trick button only lights up in the air
+    E.trick.classList.toggle('ready', player.canTrick && !player.trick);
     // throw button
     const paper = a && a.type === 'paper';
+    document.body.classList.toggle('paper-job', !!paper);
     this.show('throw', E.throwBtn, !!paper);
     if (paper) this.set('papers', E.papers, `${a.papers}`);
 

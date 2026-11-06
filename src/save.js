@@ -9,7 +9,7 @@ export const DEFAULT_SAVE = {
   balloons: [],
   stats: { pizzas: 0, papers: 0, jobs: 0, bestCombo: 0, styleTips: 0 },
   tips: 0,
-  settings: { quality: 'med', sens: 1, invert: false, chain: true, vol: 0.8, vib: true, fps: false, cam: 'third' },
+  settings: { quality: 'med', sens: 1, invert: false, chain: true, vol: 0.8, vib: true, fps: false, cam: 'first', swingCam: 1 },
 };
 
 export function loadSave() {

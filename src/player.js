@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { PHYS, CITY } from './config.js';
 import { clamp, damp, angleDiff } from './util.js';
+import { TRICKS, NEUTRAL } from './tricks.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -32,6 +33,13 @@ export class Player {
     this.airZipT = 0;
     this.airZipTarget = new THREE.Vector3();
     this.camRight = new THREE.Vector3(1, 0, 0);
+    this.aimFwd = new THREE.Vector3(0, 0, -1);
+    this.trick = null;
+    this.trickQueue = null;
+    this.airTricks = 0;
+    this.neutralIdx = 0;
+    this.lastTrickId = null;
+    this.repeat = 0;
     this.diving = false;
     this.flipT = -1; this.flipDur = 0.6; this.flipDir = 1;
     this.twistT = -1;
@@ -100,6 +108,7 @@ export class Player {
     this.moveDir.set(fx * input.move.y + rx * input.move.x, 0, fz * input.move.y + rz * input.move.x);
     if (this.moveDir.lengthSq() > 1) this.moveDir.normalize();
     cam.getForward(this.camFwd);
+    if (cam.getAimForward) cam.getAimForward(this.aimFwd); else this.aimFwd.copy(this.camFwd);
     this.camRight.set(rx, 0, rz);
 
     // timers
@@ -117,6 +126,11 @@ export class Player {
     if (this.rollT >= 0) { this.rollT += dt; if (this.rollT > 0.5) this.rollT = -1; }
 
     // ---- discrete actions (once per frame)
+    if (input.trickPressed) this.tryTrick(input);
+    if (this.trick) {
+      this.trick.t += dt;
+      if (this.trick.t >= TRICKS[this.trick.id].dur) this.completeTrick();
+    }
     if (input.zipPressed) this.tryZip();
     if (input.jumpPressed) this.onJumpPressed();
     if (input.jumpHeld) this.jumpHeldT += dt;
@@ -142,6 +156,15 @@ export class Player {
     const h = dt / steps;
     for (let i = 0; i < steps; i++) this.step(h, input);
 
+    if (this.trick && this.state !== 'air') {
+      if (this.trick.t / TRICKS[this.trick.id].dur > 0.72) this.completeTrick();
+      else this.bail();
+    }
+    if (this.state === 'ground' || this.state === 'wall') {
+      this.airTricks = 0;
+      this.lastTrickId = null;
+      this.repeat = 0;
+    }
     // rope wrapping around building edges (checked once per frame)
     if (this.rope.active) this.checkWrap();
 
@@ -236,14 +259,63 @@ export class Player {
   }
 
   onJumpReleased() {
-    if (this.state === 'air' && this.jumpHeldT < 0.2 && this.airTime > 0.25 && this.flipT < 0 && this.twistT < 0 && !this.diving) {
-      // quick tap in the air = trick
-      this.twistT = 0; // barrel roll
-      this.addStyle(25, 'TRICK');
-      this.emit('trick');
-    }
     this.diving = false;
     this.jumpHeldT = 0;
+  }
+
+  get canTrick() {
+    return (this.state === 'air' || this.state === 'swing') && this.respawnT < 0;
+  }
+
+  // TRICK button: stick direction picks the trick (works only in the air;
+  // pressing it mid-swing lets go of the web first)
+  tryTrick(input) {
+    if (!this.canTrick) return;
+    if (this.state === 'swing') this.release('trick');
+    const mx = input.move.x, my = input.move.y;
+    let id;
+    if (my > 0.5) id = 'frontflip';
+    else if (my < -0.5) id = 'backflip';
+    else if (mx < -0.5) id = 'rollL';
+    else if (mx > 0.5) id = 'rollR';
+    else id = NEUTRAL[this.neutralIdx++ % NEUTRAL.length];
+    if (this.trick) {
+      this.trickQueue = id;
+      return;
+    }
+    this.startTrick(id);
+  }
+
+  startTrick(id) {
+    this.trick = { id, t: 0 };
+    this.diving = false;
+    this.emit('trickStart', { id });
+  }
+
+  completeTrick() {
+    const id = this.trick.id;
+    const def = TRICKS[id];
+    this.repeat = id === this.lastTrickId || (def.name === 'BARREL ROLL' && this.lastTrickId && TRICKS[this.lastTrickId].name === 'BARREL ROLL') ? this.repeat + 1 : 0;
+    this.lastTrickId = id;
+    const prefix = ['', 'DOUBLE ', 'TRIPLE ', 'QUAD '][Math.min(this.repeat, 3)];
+    const pts = Math.round(def.pts * (1 + this.airTricks * 0.5) * (1 + this.repeat * 0.25));
+    this.airTricks++;
+    this.combo.count++;
+    this.combo.score += pts;
+    this.trick = null;
+    this.emit('trickDone', { name: prefix + def.name, pts, chain: this.airTricks });
+    if (this.trickQueue && this.state === 'air') {
+      const q = this.trickQueue;
+      this.trickQueue = null;
+      this.startTrick(q);
+    } else this.trickQueue = null;
+  }
+
+  bail() {
+    this.trick = null;
+    this.trickQueue = null;
+    this.combo.score *= 0.5;
+    this.emit('bail');
   }
 
   flip(dur) {
@@ -459,7 +531,8 @@ export class Player {
     const z = this.zipCandidate;
     z.valid = false;
     const o = cam.position;
-    const f = this.camFwd;
+    const f = this.aimFwd;
+    if (this.trick) return;
     // start the ray past the hero so third-person cameras don't target behind
     const skip = Math.max(0, _v.copy(this.pos).sub(o).dot(f)) + 2;
     const maxT = skip + 115;

@@ -146,6 +146,7 @@ export class Input {
     btn('btn-jump', () => { this._edges.jumpDown = true; this.touchJump = true; }, () => { this._edges.jumpUp = true; this.touchJump = false; });
     btn('btn-zip', () => (this._edges.zip = true));
     btn('btn-throw', () => (this._edges.throw = true));
+    btn('btn-trick', () => (this._edges.trick = true));
     btn('btn-cam', () => (this._edges.cam = true));
     btn('btn-pause', () => (this._edges.pause = true));
     btn('btn-action', () => (this._edges.action = true));
@@ -165,6 +166,7 @@ export class Input {
       if (k === 'Space') { this._edges.jumpDown = true; e.preventDefault(); }
       if (k === 'KeyE' || k === 'KeyQ') this._edges.zip = true;
       if (k === 'KeyF') this._edges.throw = true;
+      if (k === 'KeyT' || k === 'KeyG') this._edges.trick = true;
       if (k === 'KeyV' || k === 'KeyC') this._edges.cam = true;
       if (k === 'Escape' || k === 'KeyP') this._edges.pause = true;
       if (k === 'KeyM') this._edges.map = true;
@@ -198,6 +200,7 @@ export class Input {
     this.jumpHeld = !!this.touchJump || K.has('Space');
     this.zipPressed = !!E.zip;
     this.throwPressed = !!E.throw;
+    this.trickPressed = !!E.trick;
     this.camPressed = !!E.cam;
     this.pausePressed = !!E.pause;
     this.mapPressed = !!E.map;
@@ -206,7 +209,7 @@ export class Input {
     if (!this.enabled) {
       this.move.x = this.move.y = 0;
       this.look.dx = this.look.dy = 0;
-      this.jumpPressed = this.zipPressed = this.throwPressed = false;
+      this.jumpPressed = this.zipPressed = this.throwPressed = this.trickPressed = false;
     }
   }
 
