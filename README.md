@@ -50,9 +50,18 @@ Every model, texture and sound is generated in code.
 - A 1.3 km procedural island city with a downtown skyline, a landmark 300 m tower, parks, plazas, a waterfront and a suspension bridge.
 - Traffic with buses and taxis that obeys lights, turns at intersections, and stops and honks if you stand in the road.
 - Pedestrians walk the sidewalks and cheer when you land near them. Pigeons scatter, a news helicopter circles (with a spotlight at night), and there's a blimp and boats in the bay.
+- Smooth vehicle models (sedans, hatchbacks, SUVs, taxis, vans, buses) with wheel arches, glass cabins, rims and lights. Pedestrians with natural proportions, hair and shoes.
+- Iron fire escapes on brick walk-ups, rooftop solar arrays, gardens, helipads and satellite dishes, layered tree canopies, plus web splats left on walls where your lines stick.
 - Street furniture: hydrants, trash cans, mailboxes, news boxes, benches.
 - A full day/night cycle with lit windows, street lights, glowing storefronts, and fireworks over the bay at night.
 - 40 hidden 🎈 balloons to collect.
+
+**Swing races**
+- Four checkpoint courses: **Avenue Sprint** (easy), **Downtown Slalom**, **Park Loop** and the **Tower Dive**, which starts on the 300 m tower's observation deck and spirals down around it.
+- 3-2-1 countdown, live timer, gold/silver/bronze medal times, saved best times and a Retry button. Looking at the next ring and pressing ZIP web-zips you straight through it.
+
+**Adaptive music**
+- A procedural soundtrack that follows the action: pads when you walk, then bass, beats and finally full drums with an echoing arpeggio when you swing at speed. It has its own volume slider.
 
 **Delivery jobs**
 - 🍕 **Pizza delivery** (3 pizza shops): deliver 1–3 orders to rooftops or front doors before time runs out. Hard crashes ruin the pizza.
@@ -117,6 +126,8 @@ src/
   pedestrians.js   crowds (GPU-animated limbs)
   ambient.js       birds, helicopter, blimp, boats
   jobs.js          pizza deliveries + newspaper routes
+  races.js         swing race courses, rings, medals
+  vehicles.js      smooth car / van / bus models
   collectibles.js  balloons
   effects.js       particles, fireworks, speed lines
   audio.js         procedural WebAudio sound effects

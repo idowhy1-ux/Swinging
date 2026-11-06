@@ -6,6 +6,7 @@ import { roadC } from './city.js';
 import { Rng, clamp, damp } from './util.js';
 import { GeoBuilder, xform, makeInstanced } from './geo.js';
 import { makeLitMaterial } from './shaders.js';
+import { VEHICLE_TYPES } from './vehicles.js';
 
 const LANES = [2.4, 6.0];
 const CYCLE = 22;
@@ -18,35 +19,7 @@ function lanePos(axis, k, dir, lane, s, out) {
 }
 const yawFor = (axis, dir) => (axis === 0 ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI);
 
-function carGeometry(kind) {
-  const gb = new GeoBuilder({ aTint: 1 });
-  const box = new THREE.BoxGeometry(1, 1, 1);
-  const wheel = new THREE.CylinderGeometry(0.36, 0.36, 0.28, 8);
-  const T = { extra: { aTint: 1 } }, N = { extra: { aTint: 0 } };
-  if (kind === 'bus') {
-    gb.add(box, { color: 0xffffff, matrix: xform(0, 1.7, 0, 0, 0, 0, 2.5, 2.6, 11), ...T });
-    gb.add(box, { color: 0x1d2430, matrix: xform(0, 2.1, 0.3, 0, 0, 0, 2.54, 0.9, 9.6), ...N });
-    gb.add(box, { color: 0x1d2430, matrix: xform(0, 2.0, 5.48, 0, 0, 0, 2.2, 1.4, 0.1), ...N });
-    for (const z of [-3.8, 3.8]) for (const x of [-1.15, 1.15]) gb.add(wheel, { color: 0x111111, matrix: xform(x, 0.4, z, 0, 0, Math.PI / 2), ...N });
-    gb.add(box, { color: 0xfff2c0, emit: 1, matrix: xform(-0.9, 0.8, 5.51, 0, 0, 0, 0.4, 0.25, 0.05), ...N });
-    gb.add(box, { color: 0xfff2c0, emit: 1, matrix: xform(0.9, 0.8, 5.51, 0, 0, 0, 0.4, 0.25, 0.05), ...N });
-    gb.add(box, { color: 0xff2020, emit: 1, matrix: xform(-1.0, 0.9, -5.51, 0, 0, 0, 0.3, 0.3, 0.05), ...N });
-    gb.add(box, { color: 0xff2020, emit: 1, matrix: xform(1.0, 0.9, -5.51, 0, 0, 0, 0.3, 0.3, 0.05), ...N });
-    gb.add(box, { color: 0xffb000, emit: 0.8, matrix: xform(0, 3.05, 5.4, 0, 0, 0, 1.6, 0.3, 0.1), ...N });
-  } else {
-    gb.add(box, { color: 0xffffff, matrix: xform(0, 0.62, 0, 0, 0, 0, 1.86, 0.62, 4.3), ...T });
-    gb.add(box, { color: 0xffffff, matrix: xform(0, 1.15, -0.25, 0, 0, 0, 1.6, 0.5, 2.1), ...T });
-    gb.add(box, { color: 0x1b222c, matrix: xform(0, 1.15, -0.25, 0, 0, 0, 1.64, 0.4, 1.9), ...N });
-    for (const z of [-1.35, 1.35]) for (const x of [-0.9, 0.9]) gb.add(wheel, { color: 0x111111, matrix: xform(x, 0.36, z, 0, 0, Math.PI / 2), ...N });
-    gb.add(box, { color: 0xfff2c0, emit: 1, matrix: xform(-0.62, 0.68, 2.16, 0, 0, 0, 0.36, 0.18, 0.04), ...N });
-    gb.add(box, { color: 0xfff2c0, emit: 1, matrix: xform(0.62, 0.68, 2.16, 0, 0, 0, 0.36, 0.18, 0.04), ...N });
-    gb.add(box, { color: 0xff2020, emit: 1, matrix: xform(-0.66, 0.72, -2.16, 0, 0, 0, 0.34, 0.16, 0.04), ...N });
-    gb.add(box, { color: 0xff2020, emit: 1, matrix: xform(0.66, 0.72, -2.16, 0, 0, 0, 0.34, 0.16, 0.04), ...N });
-  }
-  return gb.build();
-}
-
-const CAR_COLORS = [0xc0392b, 0x2e86de, 0xf1f2f6, 0x222831, 0x7f8c8d, 0x27ae60, 0xf39c12, 0x8e44ad, 0xdfe4ea, 0x1e3799, 0xb33939];
+const CAR_COLORS = [0xa8231b, 0x1f5fa8, 0xe9ebee, 0x1b1e24, 0x6b7176, 0x2c6e49, 0xc9a227, 0x5b2a86, 0xc8ccd1, 0x14306e, 0x8c1c13, 0x3d4a52, 0x9aa3a8, 0x0f0f10];
 
 export class Traffic {
   constructor(scene, city) {
@@ -54,34 +27,32 @@ export class Traffic {
     this.rng = new Rng(77);
     this.time = 0;
     this.cars = [];
-    this.nCars = 120;
-    this.nBus = 14;
     const mat = makeLitMaterial({ emitDay: 0.25, emitNight: 2.2, tintMask: true });
-    this.carMesh = makeInstanced(carGeometry('car'), mat, this.nCars, { dynamic: true, colors: true });
-    this.busMesh = makeInstanced(carGeometry('bus'), mat, this.nBus, { dynamic: true, colors: true });
-    scene.add(this.carMesh, this.busMesh);
+    this.meshes = {};
     const col = new THREE.Color();
-    for (let i = 0; i < this.nCars + this.nBus; i++) {
-      const bus = i >= this.nCars;
-      const c = {
-        bus,
-        idx: bus ? i - this.nCars : i,
-        axis: 0, k: 0, dir: 1, lane: 0, s: 0,
-        speed: 0,
-        cruise: bus ? 10 : this.rng.float(11, 16),
-        len: bus ? 11 : 4.3,
-        turn: null,
-        decided: -999,
-        pos: new THREE.Vector3(),
-        yaw: 0,
-        honk: 0,
-      };
-      if (bus) col.setHex(this.rng.chance(0.5) ? 0x1f6fd1 : 0xe8a317);
-      else if (this.rng.chance(0.18)) col.setHex(0xf7c600); // taxi
-      else col.setHex(this.rng.pick(CAR_COLORS));
-      (bus ? this.busMesh : this.carMesh).setColorAt(c.idx, col);
-      this.cars.push(c);
-      this.spawn(c, null);
+    for (const [type, def] of Object.entries(VEHICLE_TYPES)) {
+      const mesh = makeInstanced(def.geo(), mat, def.count, { dynamic: true, colors: true });
+      this.meshes[type] = mesh;
+      scene.add(mesh);
+      for (let k = 0; k < def.count; k++) {
+        const bus = !!def.bus;
+        const c = {
+          type, bus, mesh, idx: k,
+          axis: 0, k: 0, dir: 1, lane: 0, s: 0,
+          speed: 0,
+          cruise: bus ? 10 : type === 'van' ? this.rng.float(10, 13) : this.rng.float(11, 16),
+          len: def.len, top: def.top,
+          turn: null,
+          decided: -999,
+          pos: new THREE.Vector3(),
+          yaw: 0,
+          honk: 0,
+        };
+        col.setHex(def.paint ? this.rng.pick(def.paint) : this.rng.pick(CAR_COLORS));
+        mesh.setColorAt(k, col);
+        this.cars.push(c);
+        this.spawn(c, null);
+      }
     }
     this.buildSignals(scene);
     this.lastPhase = -1;
@@ -285,16 +256,15 @@ export class Traffic {
     for (const c of this.cars) {
       Q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, c.yaw);
       M.compose(P.set(c.pos.x, 0, c.pos.z), Q, S);
-      (c.bus ? this.busMesh : this.carMesh).setMatrixAt(c.idx, M);
+      c.mesh.setMatrixAt(c.idx, M);
     }
-    this.carMesh.instanceMatrix.needsUpdate = true;
-    this.busMesh.instanceMatrix.needsUpdate = true;
+    for (const m of Object.values(this.meshes)) m.instanceMatrix.needsUpdate = true;
   }
 
   // Simple car-roof platforms: returns the car under a point, if any.
   carAt(x, y, z) {
     for (const c of this.cars) {
-      const h = c.bus ? 3.0 : 1.45;
+      const h = c.top;
       if (y < h - 0.6 || y > h + 1.2) continue;
       const dx = x - c.pos.x, dz = z - c.pos.z;
       const s = Math.sin(c.yaw), co = Math.cos(c.yaw);

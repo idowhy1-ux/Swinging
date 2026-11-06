@@ -19,6 +19,7 @@ export class Sound {
     comp.threshold.value = -14;
     comp.ratio.value = 4;
     this.master.connect(comp).connect(ctx.destination);
+    this.comp = comp;
     // white noise buffer
     const len = ctx.sampleRate * 2;
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -55,6 +56,156 @@ export class Sound {
     this.humGain = ctx.createGain();
     this.humGain.gain.value = 0.08;
     hum.connect(lp).connect(this.humGain).connect(this.master);
+    this.initMusic();
+  }
+
+  // ------------------------------------------------------------ music
+  // A small step sequencer (A minor: Am - F - C - G) whose layers fade in
+  // with the action: pads when calm, beat + bass when moving, full drums and
+  // an echoing arpeggio when swinging fast.
+  initMusic() {
+    const ctx = this.ctx;
+    const M = (this.music = { step: 0, next: ctx.currentTime + 0.3, intensity: 0.15, target: 0.15, night: 0 });
+    M.bus = ctx.createGain();
+    M.bus.gain.value = this.musicVolume ?? 0.6;
+    M.bus.connect(this.comp); // independent of the sound-effects volume
+    const layer = (g = 0) => { const n = ctx.createGain(); n.gain.value = g; n.connect(M.bus); return n; };
+    M.pad = layer(0.0);
+    M.padFilter = ctx.createBiquadFilter();
+    M.padFilter.type = 'lowpass';
+    M.padFilter.frequency.value = 1100;
+    M.padFilter.connect(M.pad);
+    M.light = layer(0);
+    M.full = layer(0);
+    M.bass = layer(0);
+    M.arp = layer(0);
+    // echo for the arpeggio
+    M.delay = ctx.createDelay(1);
+    M.delay.delayTime.value = (60 / 108) * 0.75;
+    const fb = ctx.createGain();
+    fb.gain.value = 0.32;
+    const dw = ctx.createGain();
+    dw.gain.value = 0.35;
+    M.arpIn = ctx.createGain();
+    M.arpIn.connect(M.arp);
+    M.arpIn.connect(M.delay);
+    M.delay.connect(fb).connect(M.delay);
+    M.delay.connect(dw).connect(M.arp);
+    M.chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+    M.roots = [45, 41, 36, 43];
+  }
+
+  setMusicVolume(v) {
+    this.musicVolume = v;
+    if (this.music) this.music.bus.gain.setTargetAtTime(v * 0.7, this.ctx.currentTime, 0.1);
+  }
+
+  setMusicIntensity(target, night = 0) {
+    if (!this.music) return;
+    this.music.target = target;
+    this.music.night = night;
+  }
+
+  noteHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  musicVoice(dest, type, freq, t, dur, gain, attack = 0.005, filter = 0) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let node = o;
+    if (filter) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = filter;
+      f.Q.value = 4;
+      node = o.connect(f);
+    }
+    node.connect(g).connect(dest);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+    return o;
+  }
+
+  musicNoise(dest, t, dur, gain, hp) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = hp;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t, Math.random());
+    src.stop(t + dur + 0.02);
+  }
+
+  scheduleMusic(dt) {
+    const M = this.music;
+    const ctx = this.ctx;
+    if (!M || ctx.state !== 'running') return;
+    // smooth intensity: rises quickly, falls slowly
+    const k = M.target > M.intensity ? 1.2 : 0.3;
+    M.intensity += (M.target - M.intensity) * Math.min(1, dt * k);
+    const I = M.intensity;
+    const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const now = ctx.currentTime;
+    const gl = { pad: 0.3, light: sm(0.12, 0.3, I) * (1 - sm(0.55, 0.85, I)) * 0.9, full: sm(0.5, 0.82, I), bass: sm(0.25, 0.5, I) * 0.9, arp: sm(0.62, 0.92, I) * 0.8 };
+    for (const n in gl) M[n].gain.setTargetAtTime(gl[n], now, 0.6);
+    M.padFilter.frequency.setTargetAtTime(700 + (1 - M.night) * 600 + I * 500, now, 0.5);
+    const stepDur = 60 / 108 / 4;
+    if (M.next < now - 0.5) M.next = now + 0.05; // resumed after a pause
+    while (M.next < now + 0.15) {
+      const t = M.next, s = M.step % 16, bar = Math.floor(M.step / 16) % 4;
+      const chord = M.chords[bar], root = M.roots[bar];
+      if (s === 0) {
+        for (const n of chord) for (const det of [-7, 7]) {
+          const o = this.musicVoice(M.padFilter, 'sawtooth', this.noteHz(n) * Math.pow(2, det / 1200), t, stepDur * 16 + 0.4, 0.028, 0.35);
+          void o;
+        }
+      }
+      if (gl.light > 0.02) {
+        if (s === 0 || s === 8) this.kick(M.light, t, 0.55);
+        if (s % 4 === 2) this.musicNoise(M.light, t, 0.05, 0.07, 7000);
+      }
+      if (gl.full > 0.02) {
+        if (s % 4 === 0) this.kick(M.full, t, 0.85);
+        if (s === 4 || s === 12) { this.musicNoise(M.full, t, 0.16, 0.32, 1200); this.musicVoice(M.full, 'triangle', 185, t, 0.09, 0.12); }
+        if (s === 15 && bar === 3) this.musicNoise(M.full, t, 0.12, 0.2, 1500);
+        this.musicNoise(M.full, t, s % 2 ? 0.03 : 0.05, s % 4 === 2 ? 0.1 : 0.05, 8000);
+      }
+      if (gl.bass > 0.02 && [0, 3, 6, 8, 10, 14].includes(s)) {
+        const n = s === 10 ? root + 7 : s === 14 ? root + 12 : root;
+        this.musicVoice(M.bass, 'sawtooth', this.noteHz(n), t, stepDur * (s === 0 ? 2.5 : 1.6), 0.22, 0.008, 260 + I * 380);
+      }
+      if (gl.arp > 0.02) {
+        const seq = [0, 1, 2, 1, 0, 1, 2, 3];
+        const tones = [chord[0] + 12, chord[1] + 12, chord[2] + 12, chord[0] + 24];
+        this.musicVoice(M.arpIn, 'square', this.noteHz(tones[seq[s % 8]]), t, 0.13, 0.045, 0.004, 2600);
+      }
+      M.step++;
+      M.next += stepDur;
+    }
+  }
+
+  kick(dest, t, gain) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.13);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    o.connect(g).connect(dest);
+    o.start(t);
+    o.stop(t + 0.35);
   }
 
   loop(buf) {
@@ -214,6 +365,15 @@ export class Sound {
       case 'click':
         this.tone({ dur: 0.05, type: 'triangle', f0: 1200, gain: 0.08 });
         break;
+      case 'beep':
+        this.tone({ dur: o.high ? 0.5 : 0.18, type: 'square', f0: o.high ? 1046 : 523, gain: 0.08 });
+        break;
+      case 'ring': {
+        const f = 660 * Math.pow(2, Math.min(o.n || 0, 12) / 24);
+        this.tone({ dur: 0.14, type: 'triangle', f0: f, gain: 0.14 });
+        this.tone({ dur: 0.22, type: 'triangle', f0: f * 1.5, gain: 0.1, delay: 0.06 });
+        break;
+      }
       case 'miss':
         this.tone({ dur: 0.15, type: 'triangle', f0: 300, f1: 200, gain: 0.1 });
         break;
@@ -223,6 +383,7 @@ export class Sound {
   // continuous layers
   update(dt, speed, altitude, state) {
     if (!this.ctx || this.ctx.state !== 'running') return;
+    this.scheduleMusic(dt);
     const t = this.ctx.currentTime;
     const s = Math.min(1, speed / 55);
     this.windGain.gain.setTargetAtTime(0.02 + s * s * 0.55, t, 0.15);

@@ -110,6 +110,12 @@ export class Player {
     cam.getForward(this.camFwd);
     if (cam.getAimForward) cam.getAimForward(this.aimFwd); else this.aimFwd.copy(this.camFwd);
     this.camRight.set(rx, 0, rz);
+    if (this.frozen) {
+      // race countdown: stand still on the start line
+      this.vel.set(0, 0, 0);
+      this.prevSwingHeld = input.swingHeld;
+      return;
+    }
 
     // timers
     this.vaultT = Math.max(0, this.vaultT - dt);
@@ -468,7 +474,16 @@ export class Player {
     this.state = 'swing';
     this.diving = false;
     this.addStyle(10, null);
-    this.emit('web', { side, anchor: r.visual.clone() });
+    // which face of the building the web stuck to (for the splat decal)
+    const b = a.box, e = 0.05, nrm = new THREE.Vector3(0, 1, 0);
+    if (b) {
+      if (Math.abs(a.x - b.minX) < e) nrm.set(-1, 0, 0);
+      else if (Math.abs(a.x - b.maxX) < e) nrm.set(1, 0, 0);
+      else if (Math.abs(a.z - b.minZ) < e) nrm.set(0, 0, -1);
+      else if (Math.abs(a.z - b.maxZ) < e) nrm.set(0, 0, 1);
+      else if (Math.abs(a.y - b.minY) < e) nrm.set(0, -1, 0);
+    }
+    this.emit('web', { side, anchor: r.visual.clone(), normal: nrm });
     return true;
   }
 
@@ -561,7 +576,7 @@ export class Player {
   tryZip() {
     const c = this.zipCandidate;
     if (this.state === 'zip') return;
-    if (!c.valid) {
+    if (!c.valid || (this.preferAirZip && this.state !== 'ground')) {
       if ((this.state === 'air' || this.state === 'swing') && this.airZipCD <= 0) this.airZip();
       return;
     }
@@ -911,9 +926,14 @@ export class Player {
     // auto-chain: holding swing keeps you cruising from web to web
     if (this.autoChain && input.swingHeld && r.time > 0.55) {
       _v.copy(this.pos).sub(r.anchor);
-      const ahead = _v.x * r.dirX + _v.z * r.dirZ;
+      const vh = Math.hypot(v.x, v.z) || 1;
+      // ahead of the pivot along the original swing direction, or along the
+      // current direction of travel (e.g. after turning around mid-swing)
+      const ahead = Math.max(_v.x * r.dirX + _v.z * r.dirZ, (_v.x * v.x + _v.z * v.z) / vh);
       const theta = Math.acos(clamp(-_v.y / _v.length(), -1, 1));
       if (ahead > 0 && (theta > 0.82 || (theta > 0.6 && v.y < 3))) this.release('auto');
+      // dangling with no momentum: let go so the next web fires where you look
+      else if (r.time > 2.5 && v.length() < 7 && theta < 0.5) this.release('auto');
     }
   }
 

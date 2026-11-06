@@ -31,7 +31,10 @@ export class City {
     this.doors = []; // street-facing door spots {x,z,nx,nz,building}
     this.lamps = [];
     this.trees = [];
-    this.roofProps = { boxes: [], towers: [], antennas: [], billboards: [] };
+    this.roofProps = { boxes: [], towers: [], antennas: [], billboards: [], solar: [], dishes: [], helipads: [], planters: [] };
+    this.fireEscapes = [];
+    // decorations use their own RNG so the city layout stays the same
+    this.deco = new Rng(CITY.SEED + 77);
     this.landmarks = {};
     this.layoutBlocks();
     this.generateBuildings();
@@ -41,6 +44,8 @@ export class City {
     this.buildWater();
     this.buildStreetProps();
     this.buildRoofProps();
+    this.buildRoofExtras();
+    this.buildFireEscapes();
     this.buildBridge();
   }
 
@@ -191,6 +196,7 @@ export class City {
 
     // Rooftop clutter
     this.planRoof(building);
+    this.planDecor(building);
   }
 
   planRoof(b) {
@@ -235,6 +241,133 @@ export class City {
         ad: rng.int(0, 4),
       });
     }
+  }
+
+  // Fire escapes on brick walk-ups + rooftop solar, gardens, helipads, dishes.
+  planDecor(b) {
+    const rng = this.deco;
+    const t = b.top, t0 = b.tiers[0];
+    const w = t.maxX - t.minX, d = t.maxZ - t.minZ;
+    const P = this.roofProps;
+    if (t0.style === STYLE.BRICK && t0.maxY > 13 && t0.maxY < 75 && b.doors.length && rng.chance(0.42)) {
+      const door = rng.pick(b.doors);
+      const fw = door.nx !== 0 ? t0.maxZ - t0.minZ : t0.maxX - t0.minX;
+      if (fw > 9) {
+        const off = (rng.chance(0.5) ? 1 : -1) * rng.float(fw * 0.18, fw * 0.32);
+        const fx = door.nx !== 0 ? (door.nx > 0 ? t0.maxX : t0.minX) : (t0.minX + t0.maxX) / 2 + off;
+        const fz = door.nz !== 0 ? (door.nz > 0 ? t0.maxZ : t0.minZ) : (t0.minZ + t0.maxZ) / 2 + off;
+        this.fireEscapes.push({ x: fx, z: fz, nx: door.nx, nz: door.nz, y0: t0.floorH * 1.0, y1: t0.maxY - t0.floorH * 0.6, fh: t0.floorH });
+      }
+    }
+    if (b.height < 70 && w > 12 && d > 12 && rng.chance(0.22)) {
+      const rows = Math.min(4, Math.floor((d - 6) / 2.6)), cols = Math.min(6, Math.floor((w - 6) / 1.25));
+      if (rows > 0 && cols > 1) P.solar.push({ x: (t.minX + t.maxX) / 2 + rng.float(-1, 1), y: t.maxY, z: (t.minZ + t.maxZ) / 2 + rng.float(-1, 1), rows, cols });
+    } else if (b.height < 55 && w > 12 && d > 12 && rng.chance(0.14)) {
+      // rooftop garden: planters + little trees
+      for (let k = 0; k < 4; k++) {
+        const x = rng.float(t.minX + 2.5, t.maxX - 2.5), z = rng.float(t.minZ + 2.5, t.maxZ - 2.5);
+        P.planters.push({ x, y: t.maxY, z, w: rng.float(1.6, 3), d: rng.float(0.8, 1.4) });
+        if (rng.chance(0.6)) this.trees.push({ x, z, y: t.maxY + 0.6, s: rng.float(0.45, 0.65) });
+      }
+    }
+    if (b.height > 120 && w > 18 && d > 18 && rng.chance(0.45)) P.helipads.push({ x: (t.minX + t.maxX) / 2, y: t.maxY, z: (t.minZ + t.maxZ) / 2, r: Math.min(w, d) * 0.36 });
+    if (rng.chance(0.18)) P.dishes.push({ x: rng.float(t.minX + 1.5, t.maxX - 1.5), y: t.maxY, z: rng.float(t.minZ + 1.5, t.maxZ - 1.5), rot: rng.float(0, 6.28) });
+  }
+
+  buildRoofExtras() {
+    const P = this.roofProps;
+    const mat = makeLitMaterial({ emitDay: 0.1, emitNight: 0.8 });
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1);
+    // solar panels: one instance per panel
+    const panels = [];
+    for (const s of P.solar) {
+      for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) panels.push([s.x + (c - (s.cols - 1) / 2) * 1.25, s.y, s.z + (r - (s.rows - 1) / 2) * 2.6]);
+    }
+    if (panels.length) {
+      const gb = new GeoBuilder();
+      gb.add(new THREE.BoxGeometry(1.15, 0.05, 1.9), { color: 0x1c2d4a, emit: 0, matrix: xform(0, 0.75, 0, -0.45, 0, 0) });
+      gb.add(new THREE.BoxGeometry(1.18, 0.03, 1.93), { color: 0xb8bec6, matrix: xform(0, 0.72, 0, -0.45, 0, 0) });
+      gb.add(new THREE.BoxGeometry(0.06, 0.8, 0.06), { color: 0x7a8088, matrix: xform(0, 0.4, 0.55) });
+      gb.add(new THREE.BoxGeometry(0.06, 0.35, 0.06), { color: 0x7a8088, matrix: xform(0, 0.17, -0.55) });
+      const mesh = makeInstanced(gb.build(), mat, panels.length);
+      panels.forEach((p, k) => { m.makeTranslation(p[0], p[1], p[2]); mesh.setMatrixAt(k, m); });
+      this.scene.add(castShadow(mesh));
+    }
+    if (P.planters.length) {
+      const gb = new GeoBuilder();
+      gb.add(new THREE.BoxGeometry(1, 0.6, 1), { color: 0x8a7a66, matrix: xform(0, 0.3, 0) });
+      gb.add(new THREE.BoxGeometry(0.92, 0.08, 0.92), { color: 0x3e7a32, matrix: xform(0, 0.6, 0) });
+      const mesh = makeInstanced(gb.build(), mat, P.planters.length);
+      P.planters.forEach((p, k) => { m.compose(new THREE.Vector3(p.x, p.y, p.z), q.identity(), new THREE.Vector3(p.w, 1, p.d)); mesh.setMatrixAt(k, m); });
+      this.scene.add(castShadow(mesh));
+    }
+    if (P.dishes.length) {
+      const gb = new GeoBuilder();
+      gb.add(new THREE.CylinderGeometry(0.05, 0.08, 1.0, 6), { color: 0x8c9198, matrix: xform(0, 0.5, 0) });
+      gb.add(new THREE.SphereGeometry(0.7, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.32), { color: 0xe8eaec, matrix: xform(0, 1.05, 0.15, -1.0, 0, 0) });
+      gb.add(new THREE.CylinderGeometry(0.02, 0.02, 0.7, 4), { color: 0x555a60, matrix: xform(0, 1.25, 0.45, -1.0, 0, 0) });
+      const mesh = makeInstanced(gb.build(), mat, P.dishes.length);
+      P.dishes.forEach((p, k) => { q.setFromEuler(e.set(0, p.rot, 0)); m.compose(new THREE.Vector3(p.x, p.y, p.z), q, one); mesh.setMatrixAt(k, m); });
+      this.scene.add(castShadow(mesh));
+    }
+    if (P.helipads.length) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 256;
+      const g = c.getContext('2d');
+      g.fillStyle = '#3d4248'; g.fillRect(0, 0, 256, 256);
+      g.strokeStyle = '#f2c230'; g.lineWidth = 14; g.beginPath(); g.arc(128, 128, 112, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = '#ffffff'; g.font = 'bold 150px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('H', 128, 136);
+      const tex = new THREE.CanvasTexture(c);
+      const geo = new THREE.CircleGeometry(1, 32);
+      geo.rotateX(-Math.PI / 2);
+      const hmat = new THREE.MeshLambertMaterial({ map: tex });
+      for (const h of P.helipads) {
+        const mesh = new THREE.Mesh(geo, hmat);
+        mesh.position.set(h.x, h.y + 0.06, h.z);
+        mesh.scale.setScalar(h.r);
+        this.scene.add(mesh);
+      }
+    }
+  }
+
+  buildFireEscapes() {
+    const F = this.fireEscapes;
+    if (!F.length) return;
+    const iron = 0x2b2d31;
+    const pg = new GeoBuilder();
+    pg.add(new THREE.BoxGeometry(3.0, 0.06, 1.25), { color: 0x34363b, matrix: xform(0, 0, 0.62) });
+    pg.add(new THREE.BoxGeometry(3.0, 0.045, 0.045), { color: iron, matrix: xform(0, 0.95, 1.22) });
+    pg.add(new THREE.BoxGeometry(3.0, 0.04, 0.04), { color: iron, matrix: xform(0, 0.5, 1.22) });
+    for (const sx of [-1.48, 1.48]) pg.add(new THREE.BoxGeometry(0.045, 0.045, 1.25), { color: iron, matrix: xform(sx, 0.95, 0.62) });
+    for (let k = 0; k <= 5; k++) pg.add(new THREE.BoxGeometry(0.03, 0.95, 0.03), { color: iron, matrix: xform(-1.48 + k * 0.592, 0.475, 1.22) });
+    for (const sx of [-1.48, 1.48]) pg.add(new THREE.BoxGeometry(0.03, 0.95, 0.03), { color: iron, matrix: xform(sx, 0.475, 0.1) });
+    const sg = new GeoBuilder();
+    sg.add(new THREE.BoxGeometry(1, 0.05, 0.62), { color: 0x34363b, matrix: xform(0, 0, 0) });
+    sg.add(new THREE.BoxGeometry(1, 0.04, 0.04), { color: iron, matrix: xform(0, 0.8, 0.3) });
+    const plats = [], stairs = [];
+    for (const f of F) {
+      const rot = Math.atan2(f.nx, f.nz);
+      let k = 0;
+      for (let y = f.y0; y <= f.y1; y += f.fh, k++) {
+        plats.push([f.x, y, f.z, rot]);
+        if (y + f.fh <= f.y1 + 0.01) stairs.push([f.x, y, f.z, rot, f.fh, k % 2 ? 1 : -1]);
+      }
+    }
+    const mat = makeLitMaterial({ emitDay: 0, emitNight: 0 });
+    const pm = makeInstanced(pg.build(), mat, plats.length);
+    const sm = makeInstanced(sg.build(), mat, stairs.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ'), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    plats.forEach((p, k) => { q.setFromEuler(e.set(0, p[3], 0)); m.compose(v.set(p[0], p[1], p[2]), q, sc.set(1, 1, 1)); pm.setMatrixAt(k, m); });
+    stairs.forEach((p, k) => {
+      const run = 2.3, fh = p[4], len = Math.hypot(run, fh), ang = Math.atan2(fh, run) * p[5];
+      q.setFromEuler(e.set(0, p[3], ang));
+      // centre of the flight, half way up, sitting against the wall
+      const ox = 0, oz = 0.45;
+      v.set(ox, fh / 2, oz).applyEuler(new THREE.Euler(0, p[3], 0));
+      m.compose(v.add(new THREE.Vector3(p[0], p[1], p[2])), q, sc.set(len, 1, 1));
+      sm.setMatrixAt(k, m);
+    });
+    this.scene.add(pm, sm);
   }
 
   addLandmarks() {
@@ -810,14 +943,19 @@ export class City {
       for (const [x, z] of [[a, promR], [a, -promR], [promR, a], [-promR, a]]) this.trees.push({ x, z, s: rng.float(0.9, 1.3) });
     }
     const treeGB = new GeoBuilder();
-    treeGB.add(new THREE.CylinderGeometry(0.18, 0.28, 3.2, 6), { color: 0x5a4030, matrix: xform(0, 1.6, 0) });
-    treeGB.add(new THREE.IcosahedronGeometry(2.3, 0), { color: 0x3f7a34, matrix: xform(0, 4.6, 0, 0, 0, 0, 1, 1.15, 1) });
-    treeGB.add(new THREE.IcosahedronGeometry(1.6, 0), { color: 0x4b8a3c, matrix: xform(0.5, 5.9, 0.3, 0.5, 0.3, 0) });
+    treeGB.add(new THREE.CylinderGeometry(0.16, 0.3, 3.4, 7), { color: 0x5a4030, matrix: xform(0, 1.7, 0) });
+    treeGB.add(new THREE.CylinderGeometry(0.06, 0.12, 1.8, 5), { color: 0x5a4030, matrix: xform(0.55, 3.6, 0.1, 0, 0, -0.7) });
+    treeGB.add(new THREE.CylinderGeometry(0.06, 0.11, 1.6, 5), { color: 0x5a4030, matrix: xform(-0.45, 3.7, -0.25, 0.4, 0, 0.6) });
+    // layered canopy: darker underside, sunlit top
+    treeGB.add(new THREE.IcosahedronGeometry(1.9, 0), { color: 0x355f2b, matrix: xform(0, 4.3, 0, 0, 0, 0, 1.25, 0.85, 1.2) });
+    treeGB.add(new THREE.IcosahedronGeometry(1.5, 0), { color: 0x3f7434, matrix: xform(1.0, 5.0, 0.4, 0.4, 0.5, 0) });
+    treeGB.add(new THREE.IcosahedronGeometry(1.45, 0), { color: 0x447c37, matrix: xform(-0.9, 5.1, -0.5, 0.2, 1.1, 0.3) });
+    treeGB.add(new THREE.IcosahedronGeometry(1.35, 0), { color: 0x56923f, matrix: xform(0.1, 5.9, 0.0, 0.6, 0.2, 0.1) });
     const treeMesh = makeInstanced(treeGB.build(), makeLitMaterial({ emitDay: 0, emitNight: 0 }), this.trees.length, { colors: true });
     const col = new THREE.Color();
     this.trees.forEach((t, k) => {
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rng.float(0, 6.28));
-      m.compose(new THREE.Vector3(t.x, 0, t.z), q, new THREE.Vector3(t.s, t.s, t.s));
+      m.compose(new THREE.Vector3(t.x, t.y || 0, t.z), q, new THREE.Vector3(t.s, t.s, t.s));
       treeMesh.setMatrixAt(k, m);
       col.setRGB(rng.float(0.8, 1.1), rng.float(0.85, 1.15), rng.float(0.7, 1.0));
       treeMesh.setColorAt(k, col);

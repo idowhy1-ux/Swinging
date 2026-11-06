@@ -17,6 +17,7 @@ import { Sound } from './audio.js';
 import { Input } from './input.js';
 import { Hud } from './hud.js';
 import { Jobs } from './jobs.js';
+import { Races } from './races.js';
 import { env } from './shaders.js';
 import { Shadows } from './shadows.js';
 import { PostFX, VIEWMODEL_LAYER } from './post.js';
@@ -38,7 +39,7 @@ const TIPS = [
   'JUMP on a wall kicks off toward where you look. JUMP as you clear a ledge to launch!',
   'Aim at a ledge and press ZIP to zip there. ZIP in mid-air for a web-zip speed boost.',
   'In the air, hit TRICK: push forward = front flip, back = backflip, sideways = barrel roll, no stick = spins & poses. Chain them!',
-  'Orange 🍕 and blue 📰 markers on the minimap are delivery jobs.',
+  'Orange 🍕 and blue 📰 markers on the minimap are delivery jobs. Green 🏁 markers are swing races!',
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -108,6 +109,7 @@ class Game {
     this.money = this.save.money;
     this.hud = new Hud(this);
     this.jobs = new Jobs(this.scene, this.city, this);
+    this.races = new Races(this.scene, this.city, this);
     this.state = 'title';
     this.menuStack = [];
     this.time = 0;
@@ -216,6 +218,7 @@ class Game {
     this.cam.swingTilt = [0, 0.5, 0.85][S.swingCam ?? 1] ?? 0.5;
     this.player.autoChain = S.chain;
     this.sound.setVolume(S.vol);
+    this.sound.setMusicVolume(S.music ?? 0.6);
     $('fps').classList.toggle('hidden', !S.fps);
     this.dynScale = 1;
     this.onResize();
@@ -225,6 +228,7 @@ class Game {
     }
     $('set-sens').value = S.sens;
     $('set-vol').value = S.vol;
+    $('set-music').value = S.music ?? 0.6;
   }
 
   applyUpgrades() {
@@ -280,7 +284,8 @@ class Game {
     click($('play'), () => this.startPlaying());
     click($('resume'), () => this.closeAllMenus());
     click($('respawn'), () => { this.player.teleport(this.spawn.x, this.spawn.y, this.spawn.z); this.closeAllMenus(); });
-    click($('quit-job'), () => { this.jobs.cancel(); });
+    click($('quit-job'), () => { if (this.races.active) { this.races.cancel(); this.closeAllMenus(); } else this.jobs.cancel(); });
+    click($('sum-retry'), () => { const r = this.retry; this.closeAllMenus(); if (r) r(); });
     click($('sum-ok'), () => this.closeAllMenus());
     document.querySelectorAll('[data-open]').forEach((b) => click(b, () => this.openMenu(b.dataset.open)));
     document.querySelectorAll('[data-back]').forEach((b) => click(b, () => this.back()));
@@ -294,6 +299,7 @@ class Game {
     seg('set-swingcam', (v) => (S.swingCam = +v));
     $('set-sens').addEventListener('input', (e) => { S.sens = parseFloat(e.target.value); this.applySettings(); this.persist(); });
     $('set-vol').addEventListener('input', (e) => { S.vol = parseFloat(e.target.value); this.applySettings(); this.persist(); });
+    $('set-music').addEventListener('input', (e) => { S.music = parseFloat(e.target.value); this.applySettings(); this.persist(); });
     // stop menu touches from reaching the game controls
     document.querySelectorAll('.menu').forEach((m) => m.addEventListener('pointerdown', (e) => e.stopPropagation()));
   }
@@ -362,7 +368,8 @@ class Game {
   }
 
   updatePauseMenu() {
-    $('quit-job').style.display = this.jobs.active ? '' : 'none';
+    $('quit-job').style.display = this.jobs.active || this.races.active ? '' : 'none';
+    $('quit-job').textContent = this.races.active ? 'Quit race' : 'Cancel current job';
     const s = this.stats;
     $('stats-line').innerHTML = `🍕 Pizzas: <b>${s.pizzas}</b> · 📰 Papers: <b>${s.papers}</b> · 🎈 ${this.balloons.count}/${this.balloons.total} · Best combo: <b>${s.bestCombo}</b>`;
   }
@@ -429,6 +436,9 @@ class Game {
     $('sum-title').textContent = summary.title;
     $('sum-earned').textContent = summary.earned ? `+$${summary.earned}` : '';
     $('sum-lines').innerHTML = summary.lines.map((l) => `<div>${l}</div>`).join('');
+    this.retry = summary.retry || null;
+    $('sum-retry').style.display = this.retry ? '' : 'none';
+    $('sum-ok').classList.toggle('wide', !this.retry);
     this.sound.play(cancelled ? 'miss' : 'chime');
     this.openMenu('summary');
     this.persist();
@@ -443,6 +453,7 @@ class Game {
         case 'web':
           if (this.ropeLine) this.webs.release(this.ropeLine, p.vel);
           this.ropeLine = this.webs.shoot(e.anchor, hand(e.side), p.rope.length);
+          if (e.normal) this.webs.splat(e.anchor, e.normal);
           this.ropeLine.side = e.side;
           this.sound.play('web', { pan: e.side * 0.4 });
           this.cam.kickFov(2.5);
@@ -621,7 +632,10 @@ class Game {
       this.time += dt;
       if (I.pausePressed) this.openMenu('pause');
       if (I.mapPressed) this.openMenu('map');
-      if (I.actionPressed && this.jobs.canStart()) this.jobs.start();
+      if (I.actionPressed) {
+        if (this.jobs.canStart()) this.jobs.start();
+        else if (this.races.canStart()) this.races.begin();
+      }
       if (I.throwPressed) this.jobs.throwPaper();
       this.player.update(dt, I, this.cam);
       this.handleEvents();
@@ -642,6 +656,7 @@ class Game {
         this.persist();
       }
       this.jobs.update(dt, this.player);
+      this.races.update(dt, this.player);
       this.sky.update(dt, this.cam.camera.position);
       this.cam.update(dt, this.player, I, this.world);
       // tips for new players
@@ -656,6 +671,9 @@ class Game {
       }
       this.saveTimer += dt;
       if (this.saveTimer > 15) { this.saveTimer = 0; this.persist(); }
+    } else if (this.state === 'menu') {
+      this.sound.setMusicIntensity(0.12, env.uNight.value);
+      this.sound.scheduleMusic(dt);
     } else if (this.state === 'title') {
       // slow showcase orbit around the hero on the spawn rooftop
       this.time += dt;
@@ -720,6 +738,11 @@ class Game {
       this.sound.listener.z = c.z;
       this.sound.listener.rx = Math.cos(this.cam.yaw);
       this.sound.listener.rz = -Math.sin(this.cam.yaw);
+      // music follows the action
+      const st = this.player.state;
+      let mi = st === 'ground' ? (sp > 2 ? 0.28 : 0.16) : st === 'swing' || st === 'zip' ? 0.45 + Math.min(1, sp / 45) * 0.55 : st === 'wall' ? 0.5 : 0.35 + Math.min(1, sp / 50) * 0.5;
+      if (this.races.active || this.jobs.active) mi = Math.max(mi, 0.4) + 0.15;
+      this.sound.setMusicIntensity(Math.min(1, mi), env.uNight.value);
       this.sound.update(dt, sp, this.player.pos.y, this.player.state);
       this.hud.update(dt, this);
     }

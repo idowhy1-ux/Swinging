@@ -154,7 +154,13 @@ export class Hud {
       }
     };
     const a = jobs.active;
-    if (!a) for (const s of jobs.spots) dot(s.x, s.z, s.type === 'pizza' ? '#ff8a1f' : '#3fd0ff', full ? 7 : 6, true, full ? s.name : null);
+    const racing = this.game.races.active;
+    if (!a && !racing) for (const s of jobs.spots) dot(s.x, s.z, s.type === 'pizza' ? '#ff8a1f' : '#3fd0ff', full ? 7 : 6, true, full ? s.name : null);
+    if (!a && !racing) for (const c of this.game.races.courses) dot(c.spot.x, c.spot.z, '#29c46a', full ? 7 : 5, full, full ? '🏁 ' + c.name : null);
+    if (racing) {
+      const r = racing.course.rings[racing.idx];
+      if (r) dot(r.x, r.z, '#6dffb0', 6, true);
+    }
     if (a && a.type === 'pizza') for (const o of a.orders) if (!o.done) dot(o.x, o.z, '#ff8a1f', 6, true, full ? o.who : null);
     if (a && a.type === 'paper') for (const t of a.targets) if (!t.hit) dot(t.x, t.z, '#3fd0ff', 5, true);
     // hero arrow
@@ -216,9 +222,21 @@ export class Hud {
       this.setHTML('combo', E.combo, `<b>x${cb.count}</b> COMBO <span>${Math.round(cb.score)}</span>`);
     } else this.show('combo', E.combo, false);
 
-    // job panel
+    // job / race panel
     const a = jobs.active;
-    if (a) {
+    const race = game.races.active;
+    if (race) {
+      this.show('job', E.job, true);
+      const c = race.course;
+      const best = game.races.best(c.id);
+      const fmt = (x) => `${Math.floor(x / 60)}:${(x % 60).toFixed(1).padStart(4, '0')}`;
+      this.set('jobTitle', E.jobTitle, `🏁 ${c.name}`);
+      const t = race.countdown > 0 ? 0 : race.time;
+      const nextMedal = t <= c.medals.gold ? ['🥇', c.medals.gold] : t <= c.medals.silver ? ['🥈', c.medals.silver] : t <= c.medals.bronze ? ['🥉', c.medals.bronze] : ['', 0];
+      this.setHTML('jobBody', E.jobBody,
+        `<div class="order"><span>Ring ${Math.min(race.idx + 1, c.rings.length)} / ${c.rings.length}</span><b>${fmt(t)}</b></div>` +
+        `<div class="order"><span>${nextMedal[0] ? `${nextMedal[0]} under ${fmt(nextMedal[1])}` : 'No medal'}</span><b>${best ? 'best ' + fmt(best.best) : ''}</b></div>`);
+    } else if (a) {
       this.show('job', E.job, true);
       if (a.type === 'pizza') {
         this.set('jobTitle', E.jobTitle, `🍕 ${a.spot.name}`);
@@ -252,8 +270,14 @@ export class Hud {
 
     // contextual action button
     const near = jobs.canStart();
-    this.show('action', E.action, !!near);
+    const nearRace = !near && game.races.canStart();
+    this.show('action', E.action, !!(near || nearRace));
     if (near) this.set('actionLabel', E.actionLabel, near.type === 'pizza' ? `Start pizza delivery` : `Start paper route`);
+    else if (nearRace) {
+      const b = game.races.best(nearRace.id);
+      const medal = b && b.medal ? { gold: ' 🥇', silver: ' 🥈', bronze: ' 🥉' }[b.medal] : '';
+      this.set('actionLabel', E.actionLabel, `Race: ${nearRace.name} (${nearRace.level})${medal}`);
+    }
 
     // swing + zip availability
     E.swing.classList.toggle('ready', player.anchorHint);
@@ -270,7 +294,7 @@ export class Hud {
     } else this.show('zipm', E.zipMark, false);
 
     // objective marker / edge arrow
-    const obj = jobs.objective(player);
+    const obj = jobs.objective(player) || game.races.objective(player);
     if (obj) {
       const p = this.project(obj.x, obj.y + 2, obj.z, cam.camera);
       const w = window.innerWidth, h = window.innerHeight;

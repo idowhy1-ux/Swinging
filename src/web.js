@@ -26,8 +26,48 @@ class Line {
   }
 }
 
+function splatTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.strokeStyle = '#ffffff';
+  g.lineCap = 'round';
+  const spokes = [];
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+    const r = 44 + Math.random() * 18;
+    spokes.push([a, r]);
+    g.lineWidth = 2.2;
+    g.beginPath(); g.moveTo(64, 64); g.lineTo(64 + Math.cos(a) * r, 64 + Math.sin(a) * r); g.stroke();
+  }
+  for (const k of [0.3, 0.55, 0.8]) {
+    g.lineWidth = 1.5;
+    g.beginPath();
+    spokes.forEach(([a, r], i) => {
+      const rr = r * k * (0.9 + Math.random() * 0.2);
+      const x = 64 + Math.cos(a) * rr, y = 64 + Math.sin(a) * rr;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    });
+    g.closePath();
+    g.stroke();
+  }
+  g.fillStyle = '#ffffff';
+  g.beginPath(); g.arc(64, 64, 9, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c);
+  return t;
+}
+
 export class WebSystem {
   constructor(scene) {
+    const stex = splatTexture();
+    const sgeo = new THREE.PlaneGeometry(1.5, 1.5);
+    this.splats = Array.from({ length: 12 }, () => {
+      const m = new THREE.Mesh(sgeo, new THREE.MeshBasicMaterial({ map: stex, transparent: true, depthWrite: false, opacity: 0, fog: true, polygonOffset: true, polygonOffsetFactor: -2 }));
+      m.visible = false;
+      scene.add(m);
+      return { mesh: m, life: 0 };
+    });
+    this.nextSplat = 0;
     this.lines = Array.from({ length: 8 }, () => new Line());
     const geo = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
     const mat = new THREE.MeshBasicMaterial({ color: 0xeef3ff, fog: true });
@@ -65,7 +105,27 @@ export class WebSystem {
     line.restLen = line.start.distanceTo(line.anchor) * 1.05;
   }
 
+  // leave a web splat on the surface the line stuck to
+  splat(point, normal) {
+    const s = this.splats[this.nextSplat];
+    this.nextSplat = (this.nextSplat + 1) % this.splats.length;
+    s.life = 6;
+    s.mesh.visible = true;
+    s.mesh.position.copy(point).addScaledVector(normal, 0.04);
+    s.mesh.lookAt(_a.copy(s.mesh.position).add(normal));
+    s.mesh.rotateZ(Math.random() * Math.PI * 2);
+    s.mesh.scale.setScalar(0.6);
+  }
+
   update(dt, camPos) {
+    for (const s of this.splats) {
+      if (s.life <= 0) continue;
+      s.life -= dt;
+      const grow = Math.min(1, (6 - s.life) / 0.12);
+      s.mesh.scale.setScalar(0.6 + grow * 0.4);
+      s.mesh.material.opacity = Math.min(0.95, s.life / 1.5) * grow;
+      if (s.life <= 0) s.mesh.visible = false;
+    }
     const g = -20 * dt * dt;
     let k = 0;
     for (const line of this.lines) {

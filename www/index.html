@@ -88,6 +88,8 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 #obj-mark { left: 0; top: 0; display: flex; flex-direction: column; align-items: center; }
 #obj-mark::before { content: ''; width: 18px; height: 18px; transform: rotate(45deg); border-radius: 3px; border: 3px solid #fff; background: var(--accent); margin-bottom: 4px; }
 #obj-mark.paper::before { background: var(--accent2); }
+#obj-mark.race::before { background: #6dffb0; border-radius: 50%; transform: none; }
+#obj-arrow.race > div { border-left-color: #6dffb0; }
 #obj-arrow { left: 0; top: 0; display: flex; flex-direction: column; align-items: center; }
 #obj-arrow > div { width: 0; height: 0; border-top: 13px solid transparent; border-bottom: 13px solid transparent; border-left: 24px solid var(--accent); filter: drop-shadow(0 0 3px #000); }
 #obj-arrow.paper > div { border-left-color: var(--accent2); }
@@ -254,7 +256,8 @@ body.on-title .hud, body.on-title #controls { visibility: hidden; }
     <div class="row"><span>Look sensitivity</span><input type="range" id="set-sens" min="0.3" max="2.5" step="0.1"></div>
     <div class="row"><span>Invert look Y</span><div class="seg" id="set-invert"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
     <div class="row"><span>Hold-to-cruise (auto-chain webs)</span><div class="seg" id="set-chain"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
-    <div class="row"><span>Volume</span><input type="range" id="set-vol" min="0" max="1" step="0.05"></div>
+    <div class="row"><span>Sound effects</span><input type="range" id="set-vol" min="0" max="1" step="0.05"></div>
+    <div class="row"><span>Music</span><input type="range" id="set-music" min="0" max="1" step="0.05"></div>
     <div class="row"><span>Vibration</span><div class="seg" id="set-vib"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
     <div class="row"><span>Show FPS</span><div class="seg" id="set-fps"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
     <div class="menu-btns" style="margin-top:10px"><button class="mbtn primary wide" data-back>Done</button></div>
@@ -293,6 +296,7 @@ body.on-title .hud, body.on-title #controls { visibility: hidden; }
       <div><b>Pizza</b> – deliver on time; hard crashes ruin the pizza</div>
       <div><b>Papers</b> – THROW auto-aims at the nearest subscriber</div>
       <div><b>🎈 Balloons</b> – 40 hidden around the city</div>
+      <div><b>🏁 Races</b> – stand in a green ring to race through checkpoint rings for medals</div>
     </div>
     <div class="menu-btns" style="margin-top:12px"><button class="mbtn primary wide" data-back>Got it</button></div>
   </div>
@@ -310,7 +314,7 @@ body.on-title .hud, body.on-title #controls { visibility: hidden; }
     <h2 id="sum-title">Done</h2>
     <div class="earned" id="sum-earned"></div>
     <div class="summary-lines" id="sum-lines"></div>
-    <div class="menu-btns"><button class="mbtn primary wide" id="sum-ok">Continue</button></div>
+    <div class="menu-btns"><button class="mbtn" id="sum-retry" style="display:none">↻ Retry</button><button class="mbtn primary" id="sum-ok">Continue</button></div>
   </div>
 </div>
 

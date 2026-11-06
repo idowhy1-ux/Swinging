@@ -12,23 +12,29 @@ const PANTS = [0x2c3e50, 0x34495e, 0x1e272e, 0x7f8c8d, 0x3d5a80, 0x5d4037, 0xd2b
 
 function personGeometry() {
   const gb = new GeoBuilder({ aPart: 1, aLimb: 1, aPivot: 3 });
-  const B = (w, h, d, x, y, z, part, limb, pivot, color = 0xffffff) =>
-    gb.add(new THREE.BoxGeometry(w, h, d), { color, matrix: xform(x, y, z), extra: { aPart: part, aLimb: limb, aPivot: pivot } });
-  // legs (pivot at hip)
-  B(0.16, 0.85, 0.18, 0.1, 0.45, 0, 2, 1, [0.1, 0.88, 0]);
-  B(0.16, 0.85, 0.18, -0.1, 0.45, 0, 2, -1, [-0.1, 0.88, 0]);
-  B(0.17, 0.08, 0.26, 0.1, 0.04, 0.04, 3, 1, [0.1, 0.88, 0], 0x1a1a1a);
-  B(0.17, 0.08, 0.26, -0.1, 0.04, 0.04, 3, -1, [-0.1, 0.88, 0], 0x1a1a1a);
-  // torso
-  B(0.42, 0.6, 0.24, 0, 1.17, 0, 1, 0, [0, 0, 0]);
-  // arms (pivot at shoulder)
-  B(0.12, 0.62, 0.14, 0.28, 1.15, 0, 1, 2, [0.28, 1.44, 0]);
-  B(0.12, 0.62, 0.14, -0.28, 1.15, 0, 1, -2, [-0.28, 1.44, 0]);
-  B(0.11, 0.12, 0.12, 0.28, 0.8, 0, 0, 2, [0.28, 1.44, 0]);
-  B(0.11, 0.12, 0.12, -0.28, 0.8, 0, 0, -2, [-0.28, 1.44, 0]);
-  // head + hair
-  B(0.24, 0.26, 0.24, 0, 1.62, 0, 0, 0, [0, 0, 0]);
-  B(0.26, 0.09, 0.26, 0, 1.77, -0.01, 3, 0, [0, 0, 0], 0x2a1d14);
+  const A = (geo, part, limb, pivot, m, color = 0xffffff) => gb.add(geo, { color, matrix: m, extra: { aPart: part, aLimb: limb, aPivot: pivot } });
+  for (const s of [1, -1]) {
+    const hip = [0.095 * s, 0.9, 0];
+    // tapered legs with a knee, shoes
+    A(new THREE.CylinderGeometry(0.075, 0.058, 0.47, 7), 2, s, hip, xform(0.095 * s, 0.68, 0));
+    A(new THREE.CylinderGeometry(0.057, 0.045, 0.44, 7), 2, s, hip, xform(0.095 * s, 0.25, 0));
+    A(new THREE.SphereGeometry(0.06, 7, 5), 2, s, hip, xform(0.095 * s, 0.46, 0.005));
+    A(new THREE.SphereGeometry(0.07, 7, 5), 3, s, hip, xform(0.095 * s, 0.045, 0.05, 0, 0, 0, 0.75, 0.5, 1.6), 0x1f1f22);
+    // arms: upper + forearm in the shirt colour, hands in skin
+    const sh = [0.24 * s, 1.43, 0];
+    A(new THREE.CylinderGeometry(0.052, 0.046, 0.3, 6), 1, 2 * s, sh, xform(0.25 * s, 1.27, 0, 0, 0, -0.06 * s));
+    A(new THREE.CylinderGeometry(0.044, 0.036, 0.28, 6), 1, 2 * s, sh, xform(0.265 * s, 0.98, 0.01, 0, 0, -0.04 * s));
+    A(new THREE.SphereGeometry(0.048, 6, 5), 0, 2 * s, sh, xform(0.27 * s, 0.81, 0.012, 0, 0, 0, 0.8, 1.2, 0.9));
+  }
+  // hips + torso (elliptical, chest wider than waist) + shoulders
+  A(new THREE.CylinderGeometry(0.16, 0.17, 0.16, 10), 2, 0, [0, 0, 0], xform(0, 0.93, 0, 0, 0, 0, 1, 1, 0.68));
+  A(new THREE.CylinderGeometry(0.2, 0.155, 0.5, 10), 1, 0, [0, 0, 0], xform(0, 1.22, 0, 0, 0, 0, 1, 1, 0.62));
+  A(new THREE.SphereGeometry(0.2, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), 1, 0, [0, 0, 0], xform(0, 1.46, 0, 0, 0, 0, 1, 0.42, 0.62));
+  // neck, head, hair
+  A(new THREE.CylinderGeometry(0.048, 0.055, 0.1, 6), 0, 0, [0, 0, 0], xform(0, 1.55, 0));
+  A(new THREE.SphereGeometry(0.11, 9, 7), 0, 0, [0, 0, 0], xform(0, 1.68, 0.01, 0, 0, 0, 0.9, 1.08, 1.0));
+  A(new THREE.SphereGeometry(0.118, 9, 5, 0, Math.PI * 2, 0, Math.PI * 0.55), 3, 0, [0, 0, 0], xform(0, 1.695, -0.008, -0.25, 0, 0, 0.93, 1.05, 1.05), 0x2a1d14);
+  A(new THREE.SphereGeometry(0.02, 5, 4), 0, 0, [0, 0, 0], xform(0, 1.665, 0.115), 0xffffff); // nose
   return gb.build();
 }
 

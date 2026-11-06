@@ -246,7 +246,7 @@ export class Jobs {
 
   // ------------------------------------------------------------ job start
   canStart() {
-    return !this.active && this.nearSpot;
+    return !this.active && !(this.game.races && this.game.races.active) && this.nearSpot;
   }
 
   start() {
